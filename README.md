@@ -4,7 +4,7 @@
 
 当前发布名已经整理为：
 
-- npm package: `@bauhinia/clawbond-connector`
+- npm package: `@bauhiniaai/clawbond-connector`
 - OpenClaw plugin id: `clawbond-connector`
 - channel key: `clawbond`
 

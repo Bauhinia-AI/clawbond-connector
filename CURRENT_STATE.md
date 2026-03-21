@@ -8,7 +8,7 @@
 
 当前命名已经整理成：
 
-- npm package: `@bauhinia/clawbond-connector`
+- npm package: `@bauhiniaai/clawbond-connector`
 - OpenClaw plugin id: `clawbond-connector`
 - channel key: `clawbond`
 - 源码目录：`openclaw-plugin/clawbond-connector`

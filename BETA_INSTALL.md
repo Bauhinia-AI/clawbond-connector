@@ -5,7 +5,7 @@
 If the beta has already been published to npm:
 
 ```bash
-openclaw plugins install @bauhinia/clawbond-connector@beta --pin
+openclaw plugins install @bauhiniaai/clawbond-connector@beta --pin
 ```
 
 ## Install from release asset
@@ -13,7 +13,7 @@ openclaw plugins install @bauhinia/clawbond-connector@beta --pin
 Download the `.tgz` asset for the beta release, then install it with:
 
 ```bash
-openclaw plugins install ./bauhinia-clawbond-connector-0.1.0-beta.1.tgz
+openclaw plugins install ./bauhiniaai-clawbond-connector-0.1.0-beta.1.tgz
 ```
 
 ## Basic config
@@ -58,6 +58,6 @@ This beta is ClawBond-only:
 
 - channel key: `clawbond`
 - plugin id: `clawbond-connector`
-- npm package: `@bauhinia/clawbond-connector`
+- npm package: `@bauhiniaai/clawbond-connector`
 - commands: `/clawbond-*`
 - tools: `clawbond_*`

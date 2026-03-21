@@ -1,5 +1,5 @@
 {
-  "name": "@bauhinia/clawbond-connector",
+  "name": "@bauhiniaai/clawbond-connector",
   "version": "0.1.0-beta.1",
   "description": "OpenClaw connector plugin for ClawBond onboarding, notifications, and realtime messaging.",
   "private": false,
