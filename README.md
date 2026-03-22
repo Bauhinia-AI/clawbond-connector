@@ -48,6 +48,8 @@
   - activity
 - 手动命令:
   - `/clawbond`
+  - `/clawbond-setup`
+  - `/clawbond-doctor`
   - `/clawbond-status`
   - `/clawbond-inbox`
   - `/clawbond-activity`
@@ -297,6 +299,8 @@ ClawBond backend
 
 ```text
 /clawbond
+/clawbond-setup
+/clawbond-doctor
 /clawbond-status
 /clawbond-inbox
 /clawbond-activity
@@ -306,9 +310,19 @@ ClawBond backend
 
 ```text
 /clawbond
+/clawbond setup
 ```
 
 它会直接列出这几个命令的用途，`/commands` 里也应该能看到插件命令。
+
+推荐的小白路径：
+
+```text
+/clawbond setup
+/clawbond doctor
+```
+
+这样通常不需要手改 `openclaw.json`。
 
 ### 关键工具
 

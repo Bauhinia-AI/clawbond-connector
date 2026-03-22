@@ -15,6 +15,7 @@ import {
   loadClawBondInboxDigest
 } from "../src/clawbond-assist.ts";
 import { ClawBondInboxStore } from "../src/inbox-store.ts";
+import { buildClawBondSetupConfig } from "../src/clawbond-onboarding.ts";
 import { createClawBondBeforePromptBuildHandler } from "../src/clawbond-prompt-hooks.ts";
 import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 
@@ -200,10 +201,14 @@ async function main() {
 
     const commands = createClawBondCommands({ config: cfg });
     const rootCommand = commands.find((entry) => entry.name === "clawbond");
+    const setupCommand = commands.find((entry) => entry.name === "clawbond-setup");
+    const doctorCommand = commands.find((entry) => entry.name === "clawbond-doctor");
     const statusCommand = commands.find((entry) => entry.name === "clawbond-status");
     const inboxCommand = commands.find((entry) => entry.name === "clawbond-inbox");
     const activityCommand = commands.find((entry) => entry.name === "clawbond-activity");
     assert.ok(rootCommand);
+    assert.ok(setupCommand);
+    assert.ok(doctorCommand);
     assert.ok(statusCommand);
     assert.ok(inboxCommand);
     assert.ok(activityCommand);
@@ -215,6 +220,8 @@ async function main() {
       config: cfg
     } as never);
     assert.match(rootHelpResult?.text ?? "", /ClawBond commands/);
+    assert.match(rootHelpResult?.text ?? "", /\/clawbond setup/);
+    assert.match(rootHelpResult?.text ?? "", /\/clawbond doctor/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond status/);
 
     const rootInboxResult = await rootCommand?.handler({
@@ -225,6 +232,66 @@ async function main() {
       config: cfg
     } as never);
     assert.match(rootInboxResult?.text ?? "", /unread notifications: 2/);
+
+    const rootDoctorResult = await rootCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond doctor",
+      args: "doctor",
+      config: cfg
+    } as never);
+    assert.match(rootDoctorResult?.text ?? "", /ClawBond doctor/);
+    assert.match(rootDoctorResult?.text ?? "", /binding: bound/);
+
+    const directDoctorResult = await doctorCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond-doctor",
+      config: cfg
+    } as never);
+    assert.match(directDoctorResult?.text ?? "", /ClawBond is ready/);
+
+    const emptyCfg = { channels: {} };
+    const setupPlan = buildClawBondSetupConfig(emptyCfg, { agentNameArg: "Setup Agent" });
+    assert.equal(
+      (setupPlan.nextConfig.channels as Record<string, unknown>).clawbond &&
+        typeof (setupPlan.nextConfig.channels as Record<string, unknown>).clawbond === "object",
+      true
+    );
+    assert.equal(setupPlan.agentName, "Setup Agent");
+    assert.match(setupPlan.serverUrl, /observant-blessing-production-fbe8/);
+    assert.equal(setupPlan.visibleMainSessionNotes, false);
+
+    let writtenConfig: Record<string, unknown> | null = null;
+    const setupCommands = createClawBondCommands({
+      config: emptyCfg,
+      runtime: {
+        config: {
+          loadConfig: () => emptyCfg,
+          writeConfigFile: async (nextCfg) => {
+            writtenConfig = nextCfg as Record<string, unknown>;
+          }
+        }
+      } as never
+    });
+    const directSetupCommand = setupCommands.find((entry) => entry.name === "clawbond-setup");
+    assert.ok(directSetupCommand);
+    const directSetupResult = await directSetupCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond-setup Setup Agent",
+      args: "Setup Agent",
+      config: emptyCfg
+    } as never);
+    assert.match(directSetupResult?.text ?? "", /ClawBond setup saved/);
+    assert.ok(writtenConfig);
+    const writtenChannel = (writtenConfig?.channels as Record<string, unknown>).clawbond as Record<
+      string,
+      unknown
+    >;
+    assert.equal(writtenChannel.enabled, true);
+    assert.equal(writtenChannel.agentName, "Setup Agent");
+    assert.equal(writtenChannel.visibleMainSessionNotes, false);
 
     const statusResult = await statusCommand?.handler({
       channel: "web",

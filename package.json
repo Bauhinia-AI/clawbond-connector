@@ -1,6 +1,6 @@
 {
   "name": "@bauhiniaai/clawbond-connector",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "OpenClaw connector plugin for ClawBond onboarding, notifications, and realtime messaging.",
   "private": false,
   "type": "module",
@@ -13,6 +13,9 @@
     "src",
     "README.md",
     "tsconfig.json"
+  ],
+  "bundleDependencies": [
+    "ws"
   ],
   "publishConfig": {
     "access": "public"
@@ -35,7 +38,7 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
-    "check": "node --experimental-strip-types --check ./index.ts && node --experimental-strip-types --check ./src/activity-store.ts && node --experimental-strip-types --check ./src/bootstrap-client.ts && node --experimental-strip-types --check ./src/channel.ts && node --experimental-strip-types --check ./src/clawbond-api.ts && node --experimental-strip-types --check ./src/clawbond-assist.ts && node --experimental-strip-types --check ./src/clawbond-commands.ts && node --experimental-strip-types --check ./src/clawbond-prompt-hooks.ts && node --experimental-strip-types --check ./src/clawbond-tools.ts && node --experimental-strip-types --check ./src/config.ts && node --experimental-strip-types --check ./src/credential-store.ts && node --experimental-strip-types --check ./src/inbox-store.ts && node --experimental-strip-types --check ./src/log-sanitizer.ts && node --experimental-strip-types --check ./src/message-envelope.ts && node --experimental-strip-types --check ./src/notification-client.ts && node --experimental-strip-types --check ./src/openclaw-cli.ts && node --experimental-strip-types --check ./src/platform-client.ts && node --experimental-strip-types --check ./src/runtime.ts && node --experimental-strip-types --check ./src/tooling.ts && node --experimental-strip-types --check ./src/types.ts && node --experimental-strip-types --check ./tests/bootstrap-onboarding-e2e.ts && node --experimental-strip-types --check ./tests/clawbond-assist-e2e.ts && node --experimental-strip-types --check ./tests/clawbond-tools-e2e.ts && node --experimental-strip-types --check ./tests/dm-realtime-visible-note-e2e.ts && node --experimental-strip-types --check ./tests/notification-polling-e2e.ts && node --experimental-strip-types --check ./tests/notification-realtime-e2e.ts && node --experimental-strip-types --check ./tests/platform-events-e2e.ts && node --experimental-strip-types --check ./tests/reconnect-refresh-e2e.ts && node --experimental-strip-types --check ./tests/runtime-binding-recovery-e2e.ts && node --experimental-strip-types --check ./tests/structured-message-e2e.ts",
+    "check": "node --experimental-strip-types --check ./index.ts && node --experimental-strip-types --check ./src/activity-store.ts && node --experimental-strip-types --check ./src/bootstrap-client.ts && node --experimental-strip-types --check ./src/channel.ts && node --experimental-strip-types --check ./src/clawbond-api.ts && node --experimental-strip-types --check ./src/clawbond-assist.ts && node --experimental-strip-types --check ./src/clawbond-commands.ts && node --experimental-strip-types --check ./src/clawbond-onboarding.ts && node --experimental-strip-types --check ./src/clawbond-prompt-hooks.ts && node --experimental-strip-types --check ./src/clawbond-tools.ts && node --experimental-strip-types --check ./src/config.ts && node --experimental-strip-types --check ./src/credential-store.ts && node --experimental-strip-types --check ./src/inbox-store.ts && node --experimental-strip-types --check ./src/log-sanitizer.ts && node --experimental-strip-types --check ./src/message-envelope.ts && node --experimental-strip-types --check ./src/notification-client.ts && node --experimental-strip-types --check ./src/openclaw-cli.ts && node --experimental-strip-types --check ./src/platform-client.ts && node --experimental-strip-types --check ./src/runtime.ts && node --experimental-strip-types --check ./src/tooling.ts && node --experimental-strip-types --check ./src/types.ts && node --experimental-strip-types --check ./tests/bootstrap-onboarding-e2e.ts && node --experimental-strip-types --check ./tests/clawbond-assist-e2e.ts && node --experimental-strip-types --check ./tests/clawbond-tools-e2e.ts && node --experimental-strip-types --check ./tests/dm-realtime-visible-note-e2e.ts && node --experimental-strip-types --check ./tests/notification-polling-e2e.ts && node --experimental-strip-types --check ./tests/notification-realtime-e2e.ts && node --experimental-strip-types --check ./tests/platform-events-e2e.ts && node --experimental-strip-types --check ./tests/reconnect-refresh-e2e.ts && node --experimental-strip-types --check ./tests/runtime-binding-recovery-e2e.ts && node --experimental-strip-types --check ./tests/structured-message-e2e.ts",
     "typecheck": "tsc --noEmit",
     "e2e:bootstrap-onboarding": "node --experimental-strip-types ./tests/bootstrap-onboarding-e2e.ts",
     "e2e:assist": "node --experimental-strip-types ./tests/clawbond-assist-e2e.ts",

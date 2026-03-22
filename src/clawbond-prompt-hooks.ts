@@ -2,7 +2,9 @@ import type {
   OpenClawPluginApi,
   PluginHookAgentContext,
   PluginHookBeforePromptBuildEvent,
-  PluginHookBeforePromptBuildResult
+  PluginHookBeforePromptBuildResult,
+  PluginHookSessionContext,
+  PluginHookSessionStartEvent
 } from "openclaw/plugin-sdk";
 
 import {
@@ -11,10 +13,17 @@ import {
   getClawBondAccountStatusSnapshot,
   loadClawBondPendingMainInboxSnapshot
 } from "./clawbond-assist.ts";
-import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "./openclaw-cli.ts";
+import { buildClawBondWelcomeMessage } from "./clawbond-onboarding.ts";
+import {
+  CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE,
+  queueMainSessionVisibleNote
+} from "./openclaw-cli.ts";
+
+const welcomedMainSessions = new Set<string>();
 
 export function registerClawBondPromptHooks(api: OpenClawPluginApi) {
   api.on("before_prompt_build", createClawBondBeforePromptBuildHandler(api), { priority: 20 });
+  api.on("session_start", createClawBondSessionStartHandler(api), { priority: 20 });
 }
 
 export function createClawBondBeforePromptBuildHandler(api: Pick<OpenClawPluginApi, "config"> & {
@@ -46,6 +55,33 @@ export function createClawBondBeforePromptBuildHandler(api: Pick<OpenClawPluginA
       appendSystemContext,
       prependSystemContext: joinPrependBlocks(prependSystemBlocks)
     };
+  };
+}
+
+export function createClawBondSessionStartHandler(api: Pick<OpenClawPluginApi, "config" | "runtime">) {
+  return async function onSessionStart(
+    event: PluginHookSessionStartEvent,
+    ctx: PluginHookSessionContext
+  ): Promise<void> {
+    const sessionRef = normalizeSessionRef(event.sessionKey ?? ctx.sessionKey ?? event.sessionId);
+    if (!sessionRef || !isMainSessionRef(sessionRef)) {
+      return;
+    }
+
+    if (welcomedMainSessions.has(sessionRef)) {
+      return;
+    }
+
+    const cfg = api.runtime.config?.loadConfig?.() ?? api.config;
+    const welcomeMessage = buildClawBondWelcomeMessage(cfg);
+    if (!welcomeMessage) {
+      return;
+    }
+
+    welcomedMainSessions.add(sessionRef);
+    queueMainSessionVisibleNote(welcomeMessage, {
+      label: "ClawBond"
+    });
   };
 }
 
@@ -81,9 +117,7 @@ function isMainSession(ctx: PluginHookAgentContext): boolean {
     return false;
   }
 
-  return candidates.some(
-    (value) => value === "main" || value === "agent:main:main" || value.endsWith(":main")
-  );
+  return candidates.some((value) => isMainSessionRef(value));
 }
 
 function isDirectClawBondActivation(event: PluginHookBeforePromptBuildEvent): boolean {
@@ -128,4 +162,16 @@ function joinPrependBlocks(blocks: string[]): string | undefined {
   }
 
   return normalized.join("\n\n");
+}
+
+function normalizeSessionRef(value: string | undefined): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  return value.trim();
+}
+
+function isMainSessionRef(value: string): boolean {
+  return value === "main" || value === "agent:main:main" || value.endsWith(":main");
 }

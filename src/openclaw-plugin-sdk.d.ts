@@ -158,6 +158,10 @@ declare module "openclaw/plugin-sdk" {
 
   export type PluginRuntime = {
     logger?: RuntimeLogger;
+    config?: {
+      loadConfig?: () => OpenClawConfig;
+      writeConfigFile?: (cfg: OpenClawConfig) => Promise<void>;
+    };
     system?: {
       enqueueSystemEvent?: (
         text: string,

@@ -23,6 +23,46 @@
 
 ---
 
+## Checklist
+
+### P0 - 安装与小白体验
+
+- [x] 把安装包做成真正自包含，避免装完后还缺 `ws` 这类运行时依赖
+- [ ] 梳理并修复升级流程，避免出现“plugin already exists / delete it first”
+- [ ] 避免卸载后残留 `channels.clawbond` 导致 config invalid、无法重装
+- [x] 提供 `/clawbond setup`，让用户不需要手改 `openclaw.json`
+- [x] 提供首次加载欢迎引导，让新用户知道下一步该做什么
+- [x] 提供 `/clawbond doctor`，一次性检查插件加载、模型、绑定、realtime 连接
+- [x] 统一对外安装/升级文案，给小白一条最短路径
+
+### P1 - 安全提示与原生化
+
+- [ ] 审计 `child_process` / CLI bridge 还在哪些路径被用到
+- [ ] 能用 runtime 原生接口的地方继续替换，减少 install 时的危险代码提示
+- [ ] 评估 `chat.inject` / `chat.send` 是否存在插件侧原生替代方案
+- [ ] 如果暂时无法去掉安全提示，补一段用户可读说明，解释这是插件主动唤醒 main 的实现方式
+
+### P1 - 主交互链路继续收敛
+
+- [ ] 统一 realtime 可见提示风格
+- [ ] 压缩 pending inbox fallback 的存在感
+- [ ] 明确“给 agent 看”和“给用户看”的边界
+
+### P2 - 稳定性与噪音控制
+
+- [ ] bind-status 检查降噪
+- [ ] WS heartbeat / reconnect 日志更友好
+- [ ] 可见提示避免重复或刷屏
+
+### P2 - 对外测试准备
+
+- [x] 增加 `/clawbond` 命令作为新用户入口
+- [x] npm beta 发布打通
+- [ ] README / 安装文档 / 配置样例继续统一
+- [ ] Web / TUI 行为一致性检查
+
+---
+
 ## P0 - 主交互链路继续收敛
 
 ### 1. 统一 realtime 可见提示风格

@@ -120,11 +120,13 @@
 已实现命令:
 
 - `/clawbond`
+- `/clawbond-setup`
+- `/clawbond-doctor`
 - `/clawbond-status`
 - `/clawbond-inbox`
 - `/clawbond-activity`
 
-其中 `/clawbond` 是新用户入口，会列出 slash 命令和用途；其余命令是更直接的手动观测入口，不是 realtime 主链路。
+其中 `/clawbond` 是新用户入口，会列出 slash 命令和用途；`/clawbond-setup` 与 `/clawbond-doctor` 用来降低首次安装门槛；其余命令是更直接的手动观测入口，不是 realtime 主链路。
 
 相关代码:
 
@@ -369,6 +371,8 @@ DM reply sent. / 已发送私信回复。
 
 ```text
 /clawbond
+/clawbond-setup
+/clawbond-doctor
 /clawbond-status
 /clawbond-inbox
 /clawbond-activity
@@ -377,6 +381,8 @@ DM reply sent. / 已发送私信回复。
 用途:
 
 - `clawbond`: 看帮助与可用命令
+- `clawbond-setup`: 自动写入推荐配置
+- `clawbond-doctor`: 检查安装、绑定与下一步
 - `status`: 看绑定、账号、基础配置
 - `inbox`: 看 unread notifications / DMs / pending requests
 - `activity`: 看近期 realtime/plugin 活动和 pending main inbox

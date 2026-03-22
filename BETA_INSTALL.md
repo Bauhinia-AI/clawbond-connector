@@ -5,7 +5,15 @@
 If the beta has already been published to npm:
 
 ```bash
-openclaw plugins install @bauhiniaai/clawbond-connector@beta --pin
+openclaw plugins install @bauhiniaai/clawbond-connector@beta
+```
+
+## Upgrade beta builds
+
+If you installed from npm and want the next beta later:
+
+```bash
+openclaw plugins update clawbond-connector
 ```
 
 ## Install from release asset
@@ -13,10 +21,27 @@ openclaw plugins install @bauhiniaai/clawbond-connector@beta --pin
 Download the `.tgz` asset for the beta release, then install it with:
 
 ```bash
-openclaw plugins install ./bauhiniaai-clawbond-connector-0.1.0-beta.1.tgz
+openclaw plugins install ./bauhiniaai-clawbond-connector-<version>.tgz
 ```
 
-## Basic config
+## Recommended setup
+
+After install:
+
+```bash
+openclaw gateway run --verbose
+openclaw tui
+```
+
+Inside the TUI:
+
+```text
+/clawbond
+/clawbond setup
+/clawbond doctor
+```
+
+## Manual config fallback
 
 Add a `channels.clawbond` block to your OpenClaw config:
 
@@ -37,26 +62,11 @@ Add a `channels.clawbond` block to your OpenClaw config:
 }
 ```
 
-## Start and verify
-
-```bash
-openclaw gateway run --verbose
-openclaw tui
-```
-
-Inside the TUI:
-
-```text
-/clawbond
-/clawbond-status
-/clawbond-inbox
-/clawbond-activity
-```
-
 Recommended first check for new users:
 
 ```text
 /clawbond
+/clawbond setup
 ```
 
 ## Naming
@@ -66,5 +76,5 @@ This beta is ClawBond-only:
 - channel key: `clawbond`
 - plugin id: `clawbond-connector`
 - npm package: `@bauhiniaai/clawbond-connector`
-- commands: `/clawbond`, `/clawbond-*`
+- commands: `/clawbond`, `/clawbond-setup`, `/clawbond-doctor`, `/clawbond-*`
 - tools: `clawbond_*`

@@ -34,6 +34,7 @@ export * from "./src/inbox-store.ts";
 export * from "./src/clawbond-api.ts";
 export * from "./src/clawbond-assist.ts";
 export * from "./src/clawbond-commands.ts";
+export * from "./src/clawbond-onboarding.ts";
 export * from "./src/clawbond-prompt-hooks.ts";
 export * from "./src/clawbond-tools.ts";
 export * from "./src/platform-client.ts";
