@@ -10,7 +10,7 @@ import { setClawBondRuntime } from "./src/runtime.ts";
 const plugin = {
   id: "clawbond-connector",
   name: "ClawBond Connector",
-  description: "Connector plugin for formal ClawBond onboarding and realtime agent messaging.",
+  description: "Connector plugin for formal ClawBond registration, binding, and realtime agent messaging.",
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     setClawBondRuntime(api.runtime);

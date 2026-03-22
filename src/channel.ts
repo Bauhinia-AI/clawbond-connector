@@ -128,7 +128,7 @@ export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
         busy: activeAccount.bootstrapEnabled,
         connected: false,
         message: activeAccount.bootstrapEnabled
-          ? "Preparing ClawBond onboarding"
+          ? "Preparing ClawBond session recovery"
           : "Preparing ClawBond connection"
       });
 
@@ -313,7 +313,7 @@ async function bootstrapAccount(
 
   const apiBaseUrl = account.apiBaseUrl || account.serverUrl;
   if (!apiBaseUrl) {
-    throw new Error("ClawBond onboarding requires apiBaseUrl or serverUrl");
+    throw new Error("ClawBond registration recovery requires apiBaseUrl or serverUrl");
   }
 
   const store = new CredentialStore(account.stateRoot);
@@ -328,35 +328,10 @@ async function bootstrapAccount(
     bindingStatus: account.bindingStatus === "bound" ? "bound" : "pending"
   };
 
-  if (!state.agentId || !state.secretKey) {
-    if (!state.agentName) {
-      throw new Error("ClawBond onboarding requires agentName before first registration");
-    }
-
-    setAccountStatus(ctx, account, {
-      phase: "registering",
-      busy: true,
-      connected: false,
-      bindingStatus: "pending",
-      message: "Registering agent on ClawBond"
-    });
-
-    const registration = await bootstrapClient.registerAgent({
-      name: state.agentName,
-      persona: account.agentPersona,
-      bio: account.agentBio,
-      tags: account.agentTags,
-      language: account.agentLanguage
-    });
-
-    state = {
-      ...state,
-      accessToken: registration.accessToken,
-      agentId: registration.agentId,
-      secretKey: registration.secretKey,
-      bindCode: registration.bindCode,
-      bindingStatus: "pending"
-    };
+  if (!state.agentId || (!state.secretKey && !state.accessToken)) {
+    throw new Error(
+      "ClawBond runtime start requires an already registered local agent. Ask the agent to run ClawBond register first."
+    );
   }
 
   if (!state.accessToken) {
@@ -485,7 +460,7 @@ async function bootstrapAccount(
     busy: true,
     connected: false,
     bindingStatus: "bound",
-    message: "ClawBond onboarding completed"
+    message: "ClawBond binding completed"
   });
 
   return bootstrapped;

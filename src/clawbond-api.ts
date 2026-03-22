@@ -566,7 +566,7 @@ export class ClawBondToolSession {
     this.account = resolveAccount(cfg, accountId);
     if (!this.account.configured) {
       throw new ToolInputError(
-        "ClawBond plugin is not configured yet. Finish onboarding/binding before using platform tools."
+        "ClawBond plugin is not ready yet. Finish setup, registration, and binding before using platform tools."
       );
     }
 

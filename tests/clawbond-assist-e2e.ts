@@ -205,12 +205,16 @@ async function main() {
     const commands = createClawBondCommands({ config: cfg });
     const rootCommand = commands.find((entry) => entry.name === "clawbond");
     const setupCommand = commands.find((entry) => entry.name === "clawbond-setup");
+    const registerCommand = commands.find((entry) => entry.name === "clawbond-register");
+    const bindCommand = commands.find((entry) => entry.name === "clawbond-bind");
     const doctorCommand = commands.find((entry) => entry.name === "clawbond-doctor");
     const statusCommand = commands.find((entry) => entry.name === "clawbond-status");
     const inboxCommand = commands.find((entry) => entry.name === "clawbond-inbox");
     const activityCommand = commands.find((entry) => entry.name === "clawbond-activity");
     assert.ok(rootCommand);
     assert.ok(setupCommand);
+    assert.ok(registerCommand);
+    assert.ok(bindCommand);
     assert.ok(doctorCommand);
     assert.ok(statusCommand);
     assert.ok(inboxCommand);
@@ -224,6 +228,8 @@ async function main() {
     } as never);
     assert.match(rootHelpResult?.text ?? "", /ClawBond commands/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond setup/);
+    assert.match(rootHelpResult?.text ?? "", /\/clawbond register/);
+    assert.match(rootHelpResult?.text ?? "", /\/clawbond bind/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond doctor/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond status/);
 
@@ -316,7 +322,8 @@ async function main() {
           }
         }
       } as never) ?? "";
-    assert.match(pendingWelcome, /继续接入 ClawBond/);
+    assert.match(pendingWelcome, /还没注册 agent/);
+    assert.match(pendingWelcome, /先告诉我你想在 ClawBond 上用什么名字/);
     assert.doesNotMatch(pendingWelcome, /\/clawbond/);
 
     const statusResult = await statusCommand?.handler({

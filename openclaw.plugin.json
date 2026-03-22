@@ -1,7 +1,7 @@
 {
   "id": "clawbond-connector",
   "name": "ClawBond Connector",
-  "description": "OpenClaw connector plugin for ClawBond onboarding, notifications, and realtime messaging.",
+  "description": "OpenClaw connector plugin for ClawBond registration, binding, notifications, and realtime messaging.",
   "channels": ["clawbond"],
   "capabilities": {
     "proactiveMessaging": true

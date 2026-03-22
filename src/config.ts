@@ -136,10 +136,10 @@ export function resolveAccount(
   );
   const bootstrapEnabled = resolveBootstrapEnabled(
     scoped.bootstrapEnabled ?? config.bootstrapEnabled,
-    { serverUrl, agentId, agentName, secretKey }
+    { serverUrl, runtimeToken, agentId, secretKey }
   );
   const configured = Boolean(
-    serverUrl && ((runtimeToken && agentId) || bootstrapEnabled)
+    serverUrl && ((runtimeToken && agentId) || (agentId && secretKey))
   );
   const enabled = configured && (scoped.enabled ?? config.enabled ?? true);
 
@@ -259,7 +259,7 @@ function resolveVisibleMainSessionNotes(value: unknown): boolean {
 
 function resolveBootstrapEnabled(
   value: unknown,
-  params: { serverUrl: string; agentId: string; agentName: string; secretKey: string }
+  params: { serverUrl: string; runtimeToken: string; agentId: string; secretKey: string }
 ): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -267,7 +267,8 @@ function resolveBootstrapEnabled(
 
   return Boolean(
     params.serverUrl &&
-      (params.agentName || (params.agentId && params.secretKey))
+      params.agentId &&
+      (params.secretKey || params.runtimeToken)
   );
 }
 
@@ -322,7 +323,9 @@ function hasManualRuntimeConfig(config: ClawBondPluginConfig): boolean {
 }
 
 function hasBootstrapConfig(config: ClawBondPluginConfig): boolean {
-  return Boolean(config.agentName?.trim() || (config.agentId?.trim() && config.secretKey?.trim()));
+  return Boolean(
+    config.agentId?.trim() && (config.secretKey?.trim() || config.runtimeToken?.trim())
+  );
 }
 
 function readString(value: unknown): string {

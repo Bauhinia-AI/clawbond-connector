@@ -6,12 +6,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { ClawBondActivityStore } from "../src/activity-store.ts";
+import { CredentialStore } from "../src/credential-store.ts";
 import { ClawBondInboxStore } from "../src/inbox-store.ts";
 import { createClawBondTools } from "../src/clawbond-tools.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
   const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-tools-e2e-"));
+  const registerStateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-register-tools-e2e-"));
   const openclawDir = await mkdtemp(path.join(tmpdir(), "clawbond-tools-openclaw-"));
   const openclawLogPath = path.join(openclawDir, "openclaw.log");
   const fakeOpenClawPath = path.join(openclawDir, "openclaw");
@@ -27,6 +29,15 @@ async function main() {
   await chmod(fakeOpenClawPath, 0o755);
 
   const seen: Array<{ method: string; pathname: string; body?: unknown }> = [];
+  const registerState = {
+    accessToken: "agent_jwt_register",
+    refreshedToken: "agent_jwt_register_refreshed",
+    agentId: "agent-register",
+    agentName: "Fresh Agent",
+    secretKey: "secret-register",
+    bindCode: "BIND-REGISTER",
+    bound: false
+  };
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -53,18 +64,87 @@ async function main() {
     };
 
     if (pathname === "/api/agent/me" && method === "GET") {
-      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
-      send(200, { id: "agent-local", name: "Tool Test Agent", user_id: "user-1" });
+      const auth = req.headers.authorization;
+      if (auth === "Bearer agent_jwt_test") {
+        send(200, { id: "agent-local", name: "Tool Test Agent", user_id: "user-1" });
+        return;
+      }
+
+      if (
+        auth === `Bearer ${registerState.accessToken}` ||
+        auth === `Bearer ${registerState.refreshedToken}`
+      ) {
+        send(200, {
+          id: registerState.agentId,
+          name: registerState.agentName,
+          user_id: registerState.bound ? "user-register" : null,
+          bind_code: registerState.bound ? "BIND-BOUND" : registerState.bindCode
+        });
+        return;
+      }
+
+      assert.fail(`Unexpected auth header for /api/agent/me: ${String(auth)}`);
       return;
     }
 
     if (pathname === "/api/agent/bind-status" && method === "GET") {
-      send(200, { bound: true, user_id: "user-1", username: "test5" });
+      const auth = req.headers.authorization;
+      if (auth === "Bearer agent_jwt_test") {
+        send(200, { bound: true, user_id: "user-1", username: "test5" });
+        return;
+      }
+
+      if (
+        auth === `Bearer ${registerState.accessToken}` ||
+        auth === `Bearer ${registerState.refreshedToken}`
+      ) {
+        send(
+          200,
+          registerState.bound
+            ? { bound: true, user_id: "user-register", username: "fresh-user" }
+            : { bound: false }
+        );
+        return;
+      }
+
+      assert.fail(`Unexpected auth header for /api/agent/bind-status: ${String(auth)}`);
       return;
     }
 
     if (pathname === "/api/agent/capabilities" && method === "GET") {
       send(200, { dm: true, learning: true });
+      return;
+    }
+
+    if (pathname === "/api/agent/me" && method === "PUT") {
+      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
+      send(200, { id: "agent-local", name: (body as Record<string, unknown>).name ?? "Tool Test Agent" });
+      return;
+    }
+
+    if (pathname === "/api/agent/capabilities" && method === "PUT") {
+      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
+      send(200, { ...(body as Record<string, unknown>) });
+      return;
+    }
+
+    if (pathname === "/api/auth/agent/register" && method === "POST") {
+      assert.deepEqual(body, { name: "Fresh Agent" });
+      send(200, {
+        access_token: registerState.accessToken,
+        agent_id: registerState.agentId,
+        secret_key: registerState.secretKey,
+        bind_code: registerState.bindCode
+      });
+      return;
+    }
+
+    if (pathname === "/api/auth/agent/refresh" && method === "POST") {
+      assert.deepEqual(body, {
+        agent_id: registerState.agentId,
+        secret_key: registerState.secretKey
+      });
+      send(200, { access_token: registerState.refreshedToken });
       return;
     }
 
@@ -155,8 +235,9 @@ async function main() {
     sessionKey: "agent:main:main"
   });
 
-  const onboardingTool = requireTool(tools, "clawbond_onboarding");
+  const registerTool = requireTool(tools, "clawbond_register");
   const statusTool = requireTool(tools, "clawbond_status");
+  const agentProfileTool = requireTool(tools, "clawbond_agent_profile");
   const feedTool = requireTool(tools, "clawbond_get_feed");
   const createPostTool = requireTool(tools, "clawbond_create_post");
   const dmTool = requireTool(tools, "clawbond_dm");
@@ -185,14 +266,14 @@ async function main() {
       receivedAt: "2026-03-19T09:00:00Z"
     });
 
-    const onboardingSummary = await onboardingTool.execute("tool-0", {
+    const registerSummary = await registerTool.execute("tool-0", {
       action: "summary"
     });
-    assert.equal(onboardingSummary.details["phase"], "ready");
-    assert.equal(onboardingSummary.details["visibleMainSessionNotes"], true);
+    assert.equal(registerSummary.details["phase"], "ready");
+    assert.equal(registerSummary.details["visibleMainSessionNotes"], true);
 
-    const onboardingUpdate = await onboardingTool.execute("tool-0b", {
-      action: "update_local_settings",
+    const onboardingUpdate = await registerTool.execute("tool-0b", {
+      action: "local_settings",
       notificationsEnabled: false,
       visibleMainSessionNotes: false
     });
@@ -209,6 +290,23 @@ async function main() {
     const statusResult = await statusTool.execute("tool-1", { action: "summary" });
     assert.equal(statusResult.details["profile"]["name"], "Tool Test Agent");
     assert.equal(statusResult.details["bindStatus"]["bound"], true);
+
+    const updateProfileResult = await agentProfileTool.execute("tool-1b", {
+      action: "update_me",
+      patch: {
+        name: "Tool Test Agent v2"
+      }
+    });
+    assert.equal(updateProfileResult.details["updatedProfile"]["name"], "Tool Test Agent v2");
+
+    const updateCapabilitiesResult = await agentProfileTool.execute("tool-1c", {
+      action: "update_capabilities",
+      patch: {
+        dm: true,
+        learning: false
+      }
+    });
+    assert.equal(updateCapabilitiesResult.details["updatedCapabilities"]["learning"], false);
 
     const feedResult = await feedTool.execute("tool-2", { action: "agent", limit: 5 });
     assert.equal(feedResult.details["items"][0]["id"], "post-1");
@@ -282,11 +380,77 @@ async function main() {
     const activityResult = await activityTool.execute("tool-5", { action: "active" });
     assert.equal(activityResult.details["activeSessions"][0]["peerId"], "peer-1");
 
+    let registerRuntimeConfig = {
+      channels: {
+        clawbond: {
+          enabled: true,
+          serverUrl: baseUrl,
+          apiBaseUrl: baseUrl,
+          socialBaseUrl: baseUrl,
+          stateRoot: registerStateRoot
+        }
+      }
+    } as Record<string, unknown>;
+
+    setClawBondRuntime({
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined
+      },
+      config: {
+        loadConfig: () => registerRuntimeConfig as never,
+        writeConfigFile: async (nextCfg) => {
+          registerRuntimeConfig = nextCfg as Record<string, unknown>;
+        }
+      }
+    } as never);
+
+    const registerOnlyTools = createClawBondTools({
+      config: registerRuntimeConfig as never,
+      senderIsOwner: true,
+      agentAccountId: "default",
+      sessionKey: "agent:main:main"
+    });
+    const explicitRegisterTool = requireTool(registerOnlyTools, "clawbond_register");
+
+    const preCreateSummary = await explicitRegisterTool.execute("tool-6", {
+      action: "summary"
+    });
+    assert.equal(preCreateSummary.details["phase"], "registration_required");
+
+    const registerCreate = await explicitRegisterTool.execute("tool-7", {
+      action: "create",
+      agentName: "Fresh Agent"
+    });
+    assert.match(
+      registerCreate.content[0]?.type === "text" ? registerCreate.content[0].text : "",
+      /ClawBond agent registered/
+    );
+    assert.equal(registerCreate.details["phase"], "waiting_for_bind");
+
+    const stored = new CredentialStore(registerStateRoot).loadSync("default");
+    assert.equal(stored?.credentials.agent_id, registerState.agentId);
+    assert.equal(stored?.credentials.binding_status, "pending");
+
+    registerState.bound = true;
+    const bindResult = await explicitRegisterTool.execute("tool-8", {
+      action: "bind"
+    });
+    assert.match(
+      bindResult.content[0]?.type === "text" ? bindResult.content[0].text : "",
+      /ClawBond binding is complete/
+    );
+    assert.equal(bindResult.details["phase"], "ready");
+    assert.equal(bindResult.details["bindingStatus"], "bound");
+
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/me"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/feed/agent"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/posts"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations/conv-1/messages"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/register"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/refresh"));
 
     console.log("clawbond-tools E2E passed");
   } finally {
@@ -307,6 +471,7 @@ async function main() {
       });
     });
     await rm(stateRoot, { recursive: true, force: true });
+    await rm(registerStateRoot, { recursive: true, force: true });
     await rm(openclawDir, { recursive: true, force: true });
   }
 }

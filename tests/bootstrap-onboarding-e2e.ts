@@ -14,41 +14,40 @@ import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
   const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-bootstrap-e2e-"));
-  const registration = {
-    access_token: "agent_jwt_register",
-    agent_id: "agent_1001",
-    secret_key: "secret_1001",
-    bind_code: "BIND1234"
-  };
+  const pendingSessionToken = "agent_jwt_pending";
   const boundSessionToken = "agent_jwt_bound";
+  const persistedAgent = {
+    agentId: "agent_1001",
+    agentName: "Galaxy QA Claw",
+    secretKey: "secret_1001",
+    bindCode: "BIND1234"
+  };
   const refreshBodies: Array<{ agent_id?: string; secret_key?: string }> = [];
   const seenStatuses: Array<Record<string, unknown>> = [];
   const meTokens: string[] = [];
   let bindStatusChecks = 0;
   let wsToken = "";
 
+  const store = new CredentialStore(stateRoot);
+  await store.save("default", {
+    platform_base_url: "http://placeholder",
+    agent_access_token: pendingSessionToken,
+    agent_id: persistedAgent.agentId,
+    agent_name: persistedAgent.agentName,
+    secret_key: persistedAgent.secretKey,
+    bind_code: persistedAgent.bindCode,
+    binding_status: "pending"
+  });
+
   const wss = new WebSocketServer({ noServer: true });
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
-    if (req.method === "POST" && url.pathname === "/api/auth/agent/register") {
-      const body = await readJsonBody(req);
-      assert.equal(body.name, "Galaxy QA Claw");
-      assert.equal(body.persona, "Helpful local copilot");
-      assert.equal(body.bio, "Lives inside OpenClaw for QA validation.");
-      assert.deepEqual(body.tags, ["qa", "plugin"]);
-      assert.equal(body.language, "zh");
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ code: 200, data: registration, message: "success" }));
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/auth/agent/refresh") {
       const body = (await readJsonBody(req)) as { agent_id?: string; secret_key?: string };
       refreshBodies.push(body);
-      assert.equal(body.agent_id, registration.agent_id);
-      assert.equal(body.secret_key, registration.secret_key);
+      assert.equal(body.agent_id, persistedAgent.agentId);
+      assert.equal(body.secret_key, persistedAgent.secretKey);
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
@@ -72,16 +71,16 @@ async function main() {
           data:
             auth === `Bearer ${boundSessionToken}`
               ? {
-                  id: registration.agent_id,
-                  name: "Galaxy QA Claw",
+                  id: persistedAgent.agentId,
+                  name: persistedAgent.agentName,
                   user_id: "user_001",
                   bind_code: "BIND5678"
                 }
               : {
-                  id: registration.agent_id,
-                  name: "Galaxy QA Claw",
+                  id: persistedAgent.agentId,
+                  name: persistedAgent.agentName,
                   user_id: null,
-                  bind_code: registration.bind_code
+                  bind_code: persistedAgent.bindCode
                 },
           message: "success"
         })
@@ -90,7 +89,7 @@ async function main() {
     }
 
     if (req.method === "GET" && url.pathname === "/api/agent/bind-status") {
-      assert.equal(req.headers.authorization, `Bearer ${registration.access_token}`);
+      assert.equal(req.headers.authorization, `Bearer ${pendingSessionToken}`);
       bindStatusChecks += 1;
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -132,18 +131,24 @@ async function main() {
     throw new Error("Failed to resolve bootstrap test server address");
   }
 
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  await store.save("default", {
+    platform_base_url: baseUrl,
+    agent_access_token: pendingSessionToken,
+    agent_id: persistedAgent.agentId,
+    agent_name: persistedAgent.agentName,
+    secret_key: persistedAgent.secretKey,
+    bind_code: persistedAgent.bindCode,
+    binding_status: "pending"
+  });
+
   const cfg = {
     channels: {
       clawbond: {
         enabled: true,
-        serverUrl: `http://127.0.0.1:${address.port}`,
+        serverUrl: baseUrl,
         inviteWebBaseUrl: "https://dev.clawbond.ai/invite",
         stateRoot,
-        agentName: "Galaxy QA Claw",
-        agentPersona: "Helpful local copilot",
-        agentBio: "Lives inside OpenClaw for QA validation.",
-        agentTags: ["qa", "plugin"],
-        agentLanguage: "zh",
         bindStatusPollIntervalMs: 25
       }
     }
@@ -151,8 +156,9 @@ async function main() {
 
   const account = resolveAccount(cfg, "default");
   assert.equal(account.bootstrapEnabled, true);
-  assert.equal(account.agentId, "");
-  assert.equal(account.runtimeToken, "");
+  assert.equal(account.agentId, persistedAgent.agentId);
+  assert.equal(account.runtimeToken, pendingSessionToken);
+  assert.equal(account.bindingStatus, "pending");
 
   const stubChannelRuntime = {
     routing: {
@@ -162,7 +168,7 @@ async function main() {
       })
     },
     session: {
-      resolveStorePath: () => "/tmp/clawbond-bootstrap-onboarding-e2e",
+      resolveStorePath: () => "/tmp/clawbond-bootstrap-register-e2e",
       readSessionUpdatedAt: () => undefined,
       recordInboundSession: async () => undefined
     },
@@ -212,38 +218,38 @@ async function main() {
     await waitFor(() => wsToken === boundSessionToken, 5000);
 
     const stored = new CredentialStore(stateRoot).loadSync(account.accountId);
-    assert.ok(stored, "expected onboarding credentials to be persisted");
-    assert.equal(stored?.credentials.agent_id, registration.agent_id);
+    assert.ok(stored, "expected persisted credentials to be updated");
+    assert.equal(stored?.credentials.agent_id, persistedAgent.agentId);
     assert.equal(stored?.credentials.agent_access_token, boundSessionToken);
     assert.equal(stored?.credentials.binding_status, "bound");
     assert.equal(stored?.credentials.owner_user_id, "user_001");
     assert.equal(stored?.credentials.bind_code, "BIND5678");
 
     const resolvedAfterBootstrap = resolveAccount(cfg, account.accountId);
-    assert.equal(resolvedAfterBootstrap.agentId, registration.agent_id);
+    assert.equal(resolvedAfterBootstrap.agentId, persistedAgent.agentId);
     assert.equal(resolvedAfterBootstrap.runtimeToken, boundSessionToken);
     assert.equal(resolvedAfterBootstrap.bindingStatus, "bound");
     assert.equal(resolvedAfterBootstrap.bindCode, "BIND5678");
 
     assert.equal(refreshBodies.length, 1);
     assert.deepEqual(meTokens, [
-      `Bearer ${registration.access_token}`,
+      `Bearer ${pendingSessionToken}`,
       `Bearer ${boundSessionToken}`
     ]);
     assert.equal(bindStatusChecks, 3);
 
     const phases = seenStatuses.map((status) => String(status.phase ?? ""));
-    assert.ok(phases.includes("registering"));
     assert.ok(phases.includes("waiting_for_bind"));
     assert.ok(phases.includes("bound"));
     assert.ok(phases.includes("connected"));
+    assert.ok(!phases.includes("registering"));
 
     const waitingStatus = seenStatuses.find((status) => status.phase === "waiting_for_bind") ?? {};
     assert.equal(waitingStatus.bindingStatus, "pending");
-    assert.equal(waitingStatus.bindCode, registration.bind_code);
+    assert.equal(waitingStatus.bindCode, persistedAgent.bindCode);
     assert.equal(waitingStatus.inviteUrl, "https://dev.clawbond.ai/invite/BIND1234");
 
-    console.log("bootstrap-onboarding E2E passed");
+    console.log("bootstrap registration-recovery E2E passed");
   } finally {
     abortController.abort();
     await runPromise;
@@ -281,7 +287,7 @@ function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
       }
 
       if (Date.now() >= deadline) {
-        reject(new Error("Timed out waiting for onboarding result"));
+        reject(new Error("Timed out waiting for registration recovery result"));
         return;
       }
 

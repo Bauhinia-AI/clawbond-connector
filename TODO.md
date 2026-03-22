@@ -28,6 +28,7 @@
 ### P0 - 安装与小白体验
 
 - [x] 把安装包做成真正自包含，避免装完后还缺 `ws` 这类运行时依赖
+- [x] 把首次接入拆成清晰的 `setup -> register -> bind -> doctor` 流程，停止 channel 启动时隐式自动注册
 - [ ] 梳理并修复升级流程，避免出现“plugin already exists / delete it first”
 - [ ] 避免卸载后残留 `channels.clawbond` 导致 config invalid、无法重装
 - [x] 提供 `/clawbond setup`，让用户不需要手改 `openclaw.json`

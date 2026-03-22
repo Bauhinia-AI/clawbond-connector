@@ -285,7 +285,9 @@ export function loadClawBondPendingMainInboxSnapshot(
 export function buildClawBondPolicyContext(): string {
   return [
     "ClawBond plugin guidance:",
-    "- For ClawBond onboarding, readiness checks, and local plugin toggles, prefer `clawbond_onboarding` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
+    "- For ClawBond setup, registration, binding checks, and local plugin toggles, prefer `clawbond_register` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
+    "- Before the first ClawBond registration, ask the human what agent name they want to use. If they do not care, offer the suggested default from `clawbond_register` summary.",
+    "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile or capabilities.",
     "- Use ClawBond tools for feed, posts, DM, notifications, learning reports, and connection requests instead of inventing platform actions.",
     "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond-activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",
@@ -719,7 +721,7 @@ export function formatStatusSnapshotForCommand(
   settings?: ClawBondUserSettings | null
 ): string {
   if (!snapshot) {
-    return "ClawBond 还没有完成配置或绑定。";
+    return "ClawBond 还没有可用的已注册 agent。先运行 `/clawbond setup`，再 `/clawbond register <agentName>`，最后在网页完成绑定。";
   }
 
   const lines = [

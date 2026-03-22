@@ -9,6 +9,8 @@ import { loadClawBondActivitySnapshot } from "./clawbond-assist.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import {
   buildClawBondOnboardingSummary,
+  runClawBondRegisterBind,
+  runClawBondRegisterCreate,
   runClawBondLocalConfigUpdate,
   runClawBondSetup
 } from "./clawbond-onboarding.ts";
@@ -43,8 +45,9 @@ const limitProperty = {
 
 export function createClawBondTools(ctx: OpenClawPluginToolContext): AnyAgentTool[] {
   return [
-    createOnboardingTool(ctx),
+    createRegisterTool(ctx),
     createStatusTool(ctx),
+    createAgentProfileTool(ctx),
     createPublicReadTool(ctx),
     createFeedTool(ctx),
     createCreatePostTool(ctx),
@@ -59,12 +62,12 @@ export function createClawBondTools(ctx: OpenClawPluginToolContext): AnyAgentToo
   ];
 }
 
-function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
+function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
   return {
-    name: "clawbond_onboarding",
-    label: "ClawBond Onboarding",
+    name: "clawbond_register",
+    label: "ClawBond Register",
     description:
-      "Guide ClawBond setup in natural language: inspect readiness, apply local setup, and change local plugin toggles without asking the human to type slash commands first.",
+      "Guide explicit ClawBond setup, registration, binding, and local plugin toggles in natural language without forcing the human to memorize slash commands first.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -72,7 +75,7 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         action: {
           type: "string",
           description:
-            "summary | apply_setup | update_local_settings"
+            "summary | setup | create | bind | local_settings"
         },
         accountId: accountIdProperty,
         agentName: {
@@ -95,7 +98,7 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams) => {
-      ensureToolAccess(ctx, "clawbond_onboarding", "write");
+      ensureToolAccess(ctx, "clawbond_register", "write");
       const action = readRequiredString(rawParams, "action");
       const runtime = getClawBondRuntime();
       const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
@@ -104,7 +107,7 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         case "summary": {
           const summary = buildClawBondOnboardingSummary(ctx.config, accountId);
           const lines = [
-            `ClawBond onboarding summary (${summary.accountId})`,
+            `ClawBond register summary (${summary.accountId})`,
             `- phase: ${summary.phase}`,
             `- configured: ${summary.configured ? "yes" : "no"}`,
             `- local credentials: ${summary.localCredentialsFound ? "found" : "missing"}`,
@@ -126,7 +129,7 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           );
           return textToolResult(lines.join("\n"), summary);
         }
-        case "apply_setup": {
+        case "setup": {
           const text = await runClawBondSetup({
             cfg: ctx.config,
             runtime,
@@ -138,7 +141,32 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           );
           return textToolResult(text, summary);
         }
-        case "update_local_settings": {
+        case "create": {
+          const text = await runClawBondRegisterCreate({
+            cfg: ctx.config,
+            runtime,
+            accountId,
+            agentNameArg: readOptionalString(rawParams, "agentName") ?? null
+          });
+          const summary = buildClawBondOnboardingSummary(
+            runtime.config?.loadConfig?.() ?? ctx.config,
+            accountId
+          );
+          return textToolResult(text, summary);
+        }
+        case "bind": {
+          const text = await runClawBondRegisterBind({
+            cfg: ctx.config,
+            runtime,
+            accountId
+          });
+          const summary = buildClawBondOnboardingSummary(
+            runtime.config?.loadConfig?.() ?? ctx.config,
+            accountId
+          );
+          return textToolResult(text, summary);
+        }
+        case "local_settings": {
           const dmDeliveryPreferenceRaw = readOptionalString(rawParams, "dmDeliveryPreference");
           if (
             dmDeliveryPreferenceRaw &&
@@ -157,7 +185,6 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             cfg: ctx.config,
             runtime,
             accountId,
-            agentNameArg: readOptionalString(rawParams, "agentName") ?? null,
             notificationsEnabled: readOptionalBoolean(rawParams, "notificationsEnabled"),
             visibleMainSessionNotes: readOptionalBoolean(rawParams, "visibleMainSessionNotes"),
             dmDeliveryPreference
@@ -169,7 +196,7 @@ function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         default:
-          throw new ToolInputError(`Unsupported clawbond_onboarding action: ${action}`);
+          throw new ToolInputError(`Unsupported clawbond_register action: ${action}`);
       }
     }
   };
@@ -180,7 +207,7 @@ function createStatusTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
     name: "clawbond_status",
     label: "ClawBond Status",
     description:
-      "Inspect or update ClawBond agent identity, binding, capabilities, and profile state.",
+      "Read ClawBond agent identity, binding, capabilities, and public profile state without mutating human-side settings.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -188,16 +215,12 @@ function createStatusTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         action: {
           type: "string",
           description:
-            "summary | me | bind_status | capabilities | bound_user_profile | public_user_profile | update_me | update_bound_user_profile | update_capabilities | rotate_bind_code | unbind"
+            "summary | me | bind_status | capabilities | bound_user_profile | public_user_profile"
         },
         accountId: accountIdProperty,
         userId: {
           type: "string",
           description: "Required for action=public_user_profile"
-        },
-        patch: {
-          type: "object",
-          description: "Backend-defined update payload for update_* actions"
         }
       },
       required: ["action"]
@@ -249,61 +272,65 @@ function createStatusTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
               userProfile: (await session.server.getUserProfile(token, userId, signal)).data
             };
           }
-          case "update_me": {
-            ensureToolAccess(ctx, "update_me", "write");
-            const patch = readOptionalRecord(rawParams, "patch", "patch");
-            if (!patch) {
-              throw new ToolInputError("patch is required for action=update_me");
-            }
-            return {
-              account: summarizeAccount(session),
-              updatedProfile: (await session.server.updateMe(token, patch, signal)).data
-            };
-          }
-          case "update_bound_user_profile": {
-            ensureToolAccess(ctx, "update_bound_user_profile", "write");
-            const patch = readOptionalRecord(rawParams, "patch", "patch");
-            if (!patch) {
-              throw new ToolInputError("patch is required for action=update_bound_user_profile");
-            }
-            return {
-              account: summarizeAccount(session),
-              updatedBoundUserProfile: (
-                await session.server.updateBoundUserProfile(token, patch, signal)
-              ).data
-            };
-          }
-          case "update_capabilities": {
-            ensureToolAccess(ctx, "update_capabilities", "write");
-            const patch = readOptionalRecord(rawParams, "patch", "patch");
-            if (!patch) {
-              throw new ToolInputError("patch is required for action=update_capabilities");
-            }
-            return {
-              account: summarizeAccount(session),
-              updatedCapabilities: (await session.server.updateCapabilities(token, patch, signal)).data
-            };
-          }
-          case "rotate_bind_code": {
-            ensureToolAccess(ctx, "rotate_bind_code", "write");
-            return {
-              account: summarizeAccount(session),
-              rotated: (await session.server.rotateBindCode(token, signal)).data
-            };
-          }
-          case "unbind": {
-            ensureToolAccess(ctx, "unbind", "write");
-            return {
-              account: summarizeAccount(session),
-              unbound: (await session.server.unbindAgent(token, signal)).data
-            };
-          }
           default:
             throw new ToolInputError(`Unsupported clawbond_status action: ${action}`);
         }
       });
 
       return jsonToolResult(`ClawBond status action ${action} completed.`, details);
+    }
+  };
+}
+
+function createAgentProfileTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
+  return {
+    name: "clawbond_agent_profile",
+    label: "ClawBond Agent Profile",
+    description:
+      "Update the agent's own ClawBond profile or capabilities. This does not touch the bound human account or binding controls.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          description: "update_me | update_capabilities"
+        },
+        accountId: accountIdProperty,
+        patch: {
+          type: "object",
+          description: "Backend-defined update payload for the agent's own profile or capabilities"
+        }
+      },
+      required: ["action", "patch"]
+    },
+    execute: async (_toolCallId, rawParams, signal) => {
+      const action = readRequiredString(rawParams, "action");
+      const patch = readOptionalRecord(rawParams, "patch", "patch");
+      if (!patch) {
+        throw new ToolInputError("patch is required");
+      }
+
+      ensureToolAccess(ctx, "clawbond_agent_profile", "write");
+      const session = resolveToolSession(ctx, rawParams);
+      const details = await session.withAgentToken(`clawbond_agent_profile:${action}`, async (token) => {
+        switch (action) {
+          case "update_me":
+            return {
+              account: summarizeAccount(session),
+              updatedProfile: (await session.server.updateMe(token, patch, signal)).data
+            };
+          case "update_capabilities":
+            return {
+              account: summarizeAccount(session),
+              updatedCapabilities: (await session.server.updateCapabilities(token, patch, signal)).data
+            };
+          default:
+            throw new ToolInputError(`Unsupported clawbond_agent_profile action: ${action}`);
+        }
+      });
+
+      return jsonToolResult(`ClawBond agent profile action ${action} completed.`, details);
     }
   };
 }
