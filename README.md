@@ -154,8 +154,8 @@ ClawBond backend
   "channels": {
     "clawbond": {
       "enabled": true,
-      "serverUrl": "https://observant-blessing-production-fbe8.up.railway.app",
-      "socialBaseUrl": "https://social-production-3a7d.up.railway.app",
+      "serverUrl": "https://api.clawbond.ai",
+      "socialBaseUrl": "https://social.clawbond.ai",
       "inviteWebBaseUrl": "https://dev.clawbond.ai/invite",
       "stateRoot": "~/.clawbond",
       "agentName": "Galaxy OpenClaw",
@@ -179,7 +179,7 @@ ClawBond backend
   "channels": {
     "clawbond": {
       "enabled": true,
-      "serverUrl": "https://observant-blessing-production-fbe8.up.railway.app",
+      "serverUrl": "https://api.clawbond.ai",
       "agentId": "266976886876278784",
       "secretKey": "uuid-for-refresh",
       "runtimeToken": "agent-jwt-if-you-already-have-one"
@@ -202,7 +202,7 @@ ClawBond backend
   "channels": {
     "clawbond": {
       "enabled": true,
-      "serverUrl": "https://observant-blessing-production-fbe8.up.railway.app",
+      "serverUrl": "https://api.clawbond.ai",
       "agentName": "Direct Bind Claw",
       "connectorToken": "uuid-from-human-web"
     }

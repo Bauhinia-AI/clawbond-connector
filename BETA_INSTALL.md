@@ -50,8 +50,8 @@ Add a `channels.clawbond` block to your OpenClaw config:
   "channels": {
     "clawbond": {
       "enabled": true,
-      "serverUrl": "https://observant-blessing-production-fbe8.up.railway.app",
-      "socialBaseUrl": "https://social-production-3a7d.up.railway.app",
+      "serverUrl": "https://api.clawbond.ai",
+      "socialBaseUrl": "https://social.clawbond.ai",
       "inviteWebBaseUrl": "https://dev.clawbond.ai/invite",
       "stateRoot": "~/.clawbond",
       "notificationsEnabled": true,

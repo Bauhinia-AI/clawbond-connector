@@ -3,10 +3,10 @@ import os from "node:os";
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 
 import { BootstrapClient } from "./bootstrap-client.ts";
-import { resolveAccount } from "./config.ts";
+import { resolveAccount, resolveSocialBaseUrl } from "./config.ts";
 import { CredentialStore, resolveStateRoot } from "./credential-store.ts";
 
-const DEFAULT_SERVER_URL = "https://observant-blessing-production-fbe8.up.railway.app";
+const DEFAULT_SERVER_URL = "https://api.clawbond.ai";
 const DEFAULT_INVITE_WEB_BASE_URL = "https://dev.clawbond.ai/invite";
 const DEFAULT_STATE_ROOT = "~/.clawbond";
 const DEFAULT_NOTIFICATION_POLL_INTERVAL_MS = 10000;
@@ -17,6 +17,7 @@ export type ClawBondSetupPlan = {
   changedFields: string[];
   agentName: string;
   serverUrl: string;
+  socialBaseUrl: string;
   inviteWebBaseUrl: string;
   stateRoot: string;
   visibleMainSessionNotes: boolean;
@@ -39,6 +40,7 @@ export async function runClawBondSetup(params: {
       "- config write: unavailable in this runtime",
       `- suggested agent name: ${plan.agentName}`,
       `- server: ${plan.serverUrl}`,
+      `- social: ${plan.socialBaseUrl}`,
       `- stateRoot: ${plan.stateRoot}`,
       "",
       "This OpenClaw runtime does not expose config writes to plugins yet.",
@@ -54,6 +56,7 @@ export async function runClawBondSetup(params: {
     "ClawBond setup saved.",
     `- agent name: ${plan.agentName}`,
     `- server: ${plan.serverUrl}`,
+    `- social: ${plan.socialBaseUrl}`,
     `- stateRoot: ${plan.stateRoot}`,
     `- visible realtime notes: ${plan.visibleMainSessionNotes ? "on" : "off"}`,
     `- changed fields: ${plan.changedFields.length > 0 ? plan.changedFields.join(", ") : "(none)"}`,
@@ -78,6 +81,7 @@ export function buildClawBondSetupConfig(
     normalizeText(existingChannel.agentName) ||
     buildSuggestedAgentName();
   const serverUrl = normalizeText(existingChannel.serverUrl) || DEFAULT_SERVER_URL;
+  const socialBaseUrl = resolveSocialBaseUrl(existingChannel.socialBaseUrl, serverUrl);
   const inviteWebBaseUrl =
     normalizeText(existingChannel.inviteWebBaseUrl) || DEFAULT_INVITE_WEB_BASE_URL;
   const stateRoot = normalizeText(existingChannel.stateRoot) || DEFAULT_STATE_ROOT;
@@ -90,6 +94,7 @@ export function buildClawBondSetupConfig(
 
   applyDefault(nextChannel, changedFields, "enabled", true);
   applyDefault(nextChannel, changedFields, "serverUrl", serverUrl);
+  applyDefault(nextChannel, changedFields, "socialBaseUrl", socialBaseUrl);
   applyDefault(nextChannel, changedFields, "inviteWebBaseUrl", inviteWebBaseUrl);
   applyDefault(nextChannel, changedFields, "stateRoot", stateRoot);
   applyDefault(nextChannel, changedFields, "agentName", agentName);
@@ -128,6 +133,7 @@ export function buildClawBondSetupConfig(
     changedFields,
     agentName,
     serverUrl,
+    socialBaseUrl,
     inviteWebBaseUrl,
     stateRoot,
     visibleMainSessionNotes

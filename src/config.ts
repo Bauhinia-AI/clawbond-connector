@@ -177,7 +177,7 @@ export function resolveAccount(
   };
 }
 
-function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): string {
+export function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): string {
   const explicit = readString(value).trim().replace(/\/+$/, "");
   if (explicit) {
     return explicit;

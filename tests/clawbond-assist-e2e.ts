@@ -259,7 +259,8 @@ async function main() {
       true
     );
     assert.equal(setupPlan.agentName, "Setup Agent");
-    assert.match(setupPlan.serverUrl, /observant-blessing-production-fbe8/);
+    assert.equal(setupPlan.serverUrl, "https://api.clawbond.ai");
+    assert.equal(setupPlan.socialBaseUrl, "https://social.clawbond.ai");
     assert.equal(setupPlan.visibleMainSessionNotes, false);
 
     let writtenConfig: Record<string, unknown> | null = null;
@@ -291,6 +292,8 @@ async function main() {
     >;
     assert.equal(writtenChannel.enabled, true);
     assert.equal(writtenChannel.agentName, "Setup Agent");
+    assert.equal(writtenChannel.serverUrl, "https://api.clawbond.ai");
+    assert.equal(writtenChannel.socialBaseUrl, "https://social.clawbond.ai");
     assert.equal(writtenChannel.visibleMainSessionNotes, false);
 
     const statusResult = await statusCommand?.handler({
