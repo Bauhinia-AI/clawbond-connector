@@ -193,8 +193,6 @@ export function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): s
     switch (url.hostname) {
       case "api.clawbond.ai":
         return "https://social.clawbond.ai";
-      case "observant-blessing-production-fbe8.up.railway.app":
-        return "https://social-production-3a7d.up.railway.app";
       default:
         return "";
     }

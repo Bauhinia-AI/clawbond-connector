@@ -4,7 +4,13 @@ import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 
 import { BootstrapClient } from "./bootstrap-client.ts";
 import { resolveAccount, resolveSocialBaseUrl } from "./config.ts";
-import { CredentialStore, resolveStateRoot } from "./credential-store.ts";
+import {
+  CredentialStore,
+  getDefaultUserSettings,
+  normalizeUserSettings,
+  resolveStateRoot
+} from "./credential-store.ts";
+import type { ClawBondDmDeliveryPreference } from "./types.ts";
 
 const DEFAULT_SERVER_URL = "https://api.clawbond.ai";
 const DEFAULT_INVITE_WEB_BASE_URL = "https://dev.clawbond.ai/invite";
@@ -21,6 +27,26 @@ export type ClawBondSetupPlan = {
   inviteWebBaseUrl: string;
   stateRoot: string;
   visibleMainSessionNotes: boolean;
+};
+
+export type ClawBondOnboardingSummary = {
+  accountId: string;
+  phase: "setup_required" | "waiting_for_bind" | "ready";
+  configured: boolean;
+  configBlockPresent: boolean;
+  localCredentialsFound: boolean;
+  bindingStatus: string;
+  nextStep: string;
+  inviteUrl: string | null;
+  serverUrl: string;
+  socialBaseUrl: string;
+  agentName: string;
+  agentId: string;
+  notificationsEnabled: boolean;
+  visibleMainSessionNotes: boolean;
+  dmDeliveryPreference: ClawBondDmDeliveryPreference;
+  suggestedUserPhrases: string[];
+  manualFallbackCommands: string[];
 };
 
 export async function runClawBondSetup(params: {
@@ -66,6 +92,148 @@ export async function runClawBondSetup(params: {
     "2. Run `/clawbond doctor` or `/clawbond-status`.",
     "3. If binding is still pending, open the invite URL shown there."
   ].join("\n");
+}
+
+export function buildClawBondOnboardingSummary(
+  cfg: OpenClawConfig,
+  accountId?: string | null
+): ClawBondOnboardingSummary {
+  const account = resolveAccount(cfg, accountId);
+  const rawChannel = readRecord(readRecord(cfg.channels).clawbond);
+  const store = new CredentialStore(resolveStateRoot(normalizeText(rawChannel.stateRoot)));
+  const stored = store.loadSync(account.accountId);
+  const settings = stored
+    ? store.loadUserSettingsSync(account.accountId)
+    : getDefaultUserSettings();
+  const inviteUrl = buildInviteUrl(account);
+  const nextStep = describeDoctorNextStep({
+    rawChannel,
+    accountConfigured: Boolean(account.configured),
+    bindingStatus: account.bindingStatus,
+    inviteUrl
+  });
+
+  return {
+    accountId: account.accountId,
+    phase:
+      Object.keys(rawChannel).length === 0 || !account.configured
+        ? "setup_required"
+        : account.bindingStatus === "bound"
+          ? "ready"
+          : "waiting_for_bind",
+    configured: Boolean(account.configured),
+    configBlockPresent: Object.keys(rawChannel).length > 0,
+    localCredentialsFound: Boolean(stored),
+    bindingStatus: account.bindingStatus,
+    nextStep,
+    inviteUrl,
+    serverUrl: account.serverUrl,
+    socialBaseUrl: account.socialBaseUrl,
+    agentName: account.agentName || stored?.credentials.agent_name || "",
+    agentId: account.agentId || stored?.credentials.agent_id || "",
+    notificationsEnabled: account.notificationsEnabled,
+    visibleMainSessionNotes: account.visibleMainSessionNotes,
+    dmDeliveryPreference: settings.dm_delivery_preference,
+    suggestedUserPhrases: buildSuggestedUserPhrases(
+      Object.keys(rawChannel).length === 0 || !account.configured,
+      account.bindingStatus
+    ),
+    manualFallbackCommands: ["/clawbond setup", "/clawbond doctor", "/clawbond status"]
+  };
+}
+
+export async function runClawBondLocalConfigUpdate(params: {
+  cfg: OpenClawConfig;
+  runtime?: PluginRuntime;
+  accountId?: string | null;
+  agentNameArg?: string | null;
+  notificationsEnabled?: boolean;
+  visibleMainSessionNotes?: boolean;
+  dmDeliveryPreference?: ClawBondDmDeliveryPreference | null;
+}): Promise<string> {
+  const currentConfig = params.runtime?.config?.loadConfig?.() ?? params.cfg;
+  const setupPlan = buildClawBondSetupConfig(currentConfig, {
+    agentNameArg: params.agentNameArg
+  });
+  const nextConfig: OpenClawConfig = {
+    ...setupPlan.nextConfig,
+    channels: {
+      ...readRecord(setupPlan.nextConfig.channels),
+      clawbond: {
+        ...readRecord(readRecord(setupPlan.nextConfig.channels).clawbond)
+      }
+    }
+  };
+  const nextChannel = readRecord(readRecord(nextConfig.channels).clawbond);
+  const changedFields: string[] = [];
+
+  if (typeof params.notificationsEnabled === "boolean") {
+    nextChannel.notificationsEnabled = params.notificationsEnabled;
+    changedFields.push("notificationsEnabled");
+  }
+
+  if (typeof params.visibleMainSessionNotes === "boolean") {
+    nextChannel.visibleMainSessionNotes = params.visibleMainSessionNotes;
+    changedFields.push("visibleMainSessionNotes");
+  }
+
+  if (normalizeText(params.agentNameArg)) {
+    nextChannel.agentName = normalizeText(params.agentNameArg);
+    if (!changedFields.includes("agentName")) {
+      changedFields.push("agentName");
+    }
+  }
+
+  const writeConfigFile = params.runtime?.config?.writeConfigFile;
+  if (changedFields.length > 0) {
+    if (!writeConfigFile) {
+      return [
+        "ClawBond local settings preview",
+        "- config write: unavailable in this runtime",
+        `- changed fields: ${changedFields.join(", ")}`,
+        "",
+        JSON.stringify(nextChannel, null, 2)
+      ].join("\n");
+    }
+
+    await writeConfigFile(nextConfig);
+  }
+
+  let dmPreferenceSaved = false;
+  let dmPreferenceStatus = "";
+  if (params.dmDeliveryPreference) {
+    const nextSummary = buildClawBondOnboardingSummary(nextConfig, params.accountId);
+    const store = new CredentialStore(resolveStateRoot(nextChannel.stateRoot as string | undefined));
+    const existingSettings = normalizeUserSettings(
+      store.loadUserSettingsSync(nextSummary.accountId)
+    );
+    dmPreferenceSaved = await store.saveUserSettings(nextSummary.accountId, {
+      ...existingSettings,
+      dm_delivery_preference: params.dmDeliveryPreference
+    });
+    dmPreferenceStatus = dmPreferenceSaved
+      ? params.dmDeliveryPreference
+      : `pending (${params.dmDeliveryPreference}; available after agent registration)`;
+  }
+
+  const summary = buildClawBondOnboardingSummary(
+    params.runtime?.config?.loadConfig?.() ?? nextConfig,
+    params.accountId
+  );
+
+  const lines = [
+    "ClawBond local settings updated.",
+    `- changed fields: ${changedFields.length > 0 ? changedFields.join(", ") : "(none)"}`,
+    `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
+    `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`
+  ];
+
+  if (params.dmDeliveryPreference) {
+    lines.push(`- dm delivery preference: ${dmPreferenceStatus}`);
+  }
+
+  lines.push("", `Next: ${summary.nextStep}`);
+  return lines.join("\n");
 }
 
 export function buildClawBondSetupConfig(
@@ -187,17 +355,11 @@ export function buildClawBondWelcomeMessage(cfg: OpenClawConfig): string | null 
   const rawChannel = readRecord(readRecord(cfg.channels).clawbond);
 
   if (Object.keys(rawChannel).length === 0 || !account.configured) {
-    return [
-      "ClawBond is installed. Run `/clawbond setup` to finish setup.",
-      "ClawBond 已安装，输入 `/clawbond setup` 完成初始化。"
-    ].join(" / ");
+    return "ClawBond 还没接入。你不用先记 slash 命令，直接对我说“开始接入 ClawBond”即可；我会先完成本地配置，如果还需要浏览器绑定，我再继续引导你。";
   }
 
   if (account.bindingStatus !== "bound") {
-    return [
-      "ClawBond setup is ready, but binding is not finished yet. Run `/clawbond doctor`.",
-      "ClawBond 已完成基础配置，但还没绑定完成。输入 `/clawbond doctor` 继续。"
-    ].join(" / ");
+    return "ClawBond 本地配置已就绪，但还差浏览器绑定。你可以直接说“继续接入 ClawBond”或“打开绑定链接”，我会告诉你下一步。";
   }
 
   return null;
@@ -235,6 +397,33 @@ function describeDoctorNextStep(params: {
   }
 
   return "ClawBond is ready; try `/clawbond-inbox` or just keep chatting";
+}
+
+function buildSuggestedUserPhrases(
+  setupRequired: boolean,
+  bindingStatus: string
+): string[] {
+  if (setupRequired) {
+    return [
+      "开始接入 ClawBond",
+      "帮我完成 ClawBond 本地配置",
+      "先把 ClawBond 配好"
+    ];
+  }
+
+  if (bindingStatus !== "bound") {
+    return [
+      "继续接入 ClawBond",
+      "打开绑定链接",
+      "现在下一步该做什么"
+    ];
+  }
+
+  return [
+    "打开 ClawBond 实时提示",
+    "关闭 ClawBond 实时提示",
+    "看看 ClawBond 现在状态"
+  ];
 }
 
 function describeInstallTracking(spec: string): string {

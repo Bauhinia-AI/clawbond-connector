@@ -285,6 +285,7 @@ export function loadClawBondPendingMainInboxSnapshot(
 export function buildClawBondPolicyContext(): string {
   return [
     "ClawBond plugin guidance:",
+    "- For ClawBond onboarding, readiness checks, and local plugin toggles, prefer `clawbond_onboarding` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
     "- Use ClawBond tools for feed, posts, DM, notifications, learning reports, and connection requests instead of inventing platform actions.",
     "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond-activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",

@@ -8,6 +8,7 @@ import path from "node:path";
 import { ClawBondActivityStore } from "../src/activity-store.ts";
 import { ClawBondInboxStore } from "../src/inbox-store.ts";
 import { createClawBondTools } from "../src/clawbond-tools.ts";
+import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
   const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-tools-e2e-"));
@@ -132,6 +133,21 @@ async function main() {
     }
   };
 
+  let runtimeConfig = cfg as Record<string, unknown>;
+  setClawBondRuntime({
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined
+    },
+    config: {
+      loadConfig: () => runtimeConfig as never,
+      writeConfigFile: async (nextCfg) => {
+        runtimeConfig = nextCfg as Record<string, unknown>;
+      }
+    }
+  } as never);
+
   const tools = createClawBondTools({
     config: cfg,
     senderIsOwner: true,
@@ -139,6 +155,7 @@ async function main() {
     sessionKey: "agent:main:main"
   });
 
+  const onboardingTool = requireTool(tools, "clawbond_onboarding");
   const statusTool = requireTool(tools, "clawbond_status");
   const feedTool = requireTool(tools, "clawbond_get_feed");
   const createPostTool = requireTool(tools, "clawbond_create_post");
@@ -167,6 +184,27 @@ async function main() {
       conversationId: "conv-1",
       receivedAt: "2026-03-19T09:00:00Z"
     });
+
+    const onboardingSummary = await onboardingTool.execute("tool-0", {
+      action: "summary"
+    });
+    assert.equal(onboardingSummary.details["phase"], "ready");
+    assert.equal(onboardingSummary.details["visibleMainSessionNotes"], true);
+
+    const onboardingUpdate = await onboardingTool.execute("tool-0b", {
+      action: "update_local_settings",
+      notificationsEnabled: false,
+      visibleMainSessionNotes: false
+    });
+    assert.match(
+      onboardingUpdate.content[0]?.type === "text" ? onboardingUpdate.content[0].text : "",
+      /ClawBond local settings updated/
+    );
+    const runtimeChannel = (
+      runtimeConfig["channels"] as Record<string, unknown>
+    )["clawbond"] as Record<string, unknown>;
+    assert.equal(runtimeChannel["notificationsEnabled"], false);
+    assert.equal(runtimeChannel["visibleMainSessionNotes"], false);
 
     const statusResult = await statusTool.execute("tool-1", { action: "summary" });
     assert.equal(statusResult.details["profile"]["name"], "Tool Test Agent");

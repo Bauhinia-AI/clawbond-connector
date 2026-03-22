@@ -7,8 +7,17 @@ import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondToolSession } from "./clawbond-api.ts";
 import { loadClawBondActivitySnapshot } from "./clawbond-assist.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
+import {
+  buildClawBondOnboardingSummary,
+  runClawBondLocalConfigUpdate,
+  runClawBondSetup
+} from "./clawbond-onboarding.ts";
 import { queueMainSessionVisibleNote } from "./openclaw-cli.ts";
-import type { ClawBondPendingInboxItem } from "./types.ts";
+import { getClawBondRuntime } from "./runtime.ts";
+import type {
+  ClawBondDmDeliveryPreference,
+  ClawBondPendingInboxItem
+} from "./types.ts";
 import {
   ToolInputError,
   clampLimit,
@@ -18,7 +27,8 @@ import {
   readOptionalNumber,
   readOptionalRecord,
   readOptionalString,
-  readRequiredString
+  readRequiredString,
+  textToolResult
 } from "./tooling.ts";
 
 const accountIdProperty = {
@@ -33,6 +43,7 @@ const limitProperty = {
 
 export function createClawBondTools(ctx: OpenClawPluginToolContext): AnyAgentTool[] {
   return [
+    createOnboardingTool(ctx),
     createStatusTool(ctx),
     createPublicReadTool(ctx),
     createFeedTool(ctx),
@@ -46,6 +57,122 @@ export function createClawBondTools(ctx: OpenClawPluginToolContext): AnyAgentToo
     createLearningReportsTool(ctx),
     createConnectionRequestsTool(ctx)
   ];
+}
+
+function createOnboardingTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
+  return {
+    name: "clawbond_onboarding",
+    label: "ClawBond Onboarding",
+    description:
+      "Guide ClawBond setup in natural language: inspect readiness, apply local setup, and change local plugin toggles without asking the human to type slash commands first.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          description:
+            "summary | apply_setup | update_local_settings"
+        },
+        accountId: accountIdProperty,
+        agentName: {
+          type: "string",
+          description: "Optional display name to use during initial setup or local rename."
+        },
+        notificationsEnabled: {
+          type: "boolean",
+          description: "Toggle realtime notification polling for ClawBond."
+        },
+        visibleMainSessionNotes: {
+          type: "boolean",
+          description: "Toggle visible [ClawBond] notes in the main OpenClaw chat."
+        },
+        dmDeliveryPreference: {
+          type: "string",
+          description: "Optional DM handling preference: immediate | next_chat | silent"
+        }
+      },
+      required: ["action"]
+    },
+    execute: async (_toolCallId, rawParams) => {
+      ensureToolAccess(ctx, "clawbond_onboarding", "write");
+      const action = readRequiredString(rawParams, "action");
+      const runtime = getClawBondRuntime();
+      const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
+
+      switch (action) {
+        case "summary": {
+          const summary = buildClawBondOnboardingSummary(ctx.config, accountId);
+          const lines = [
+            `ClawBond onboarding summary (${summary.accountId})`,
+            `- phase: ${summary.phase}`,
+            `- configured: ${summary.configured ? "yes" : "no"}`,
+            `- local credentials: ${summary.localCredentialsFound ? "found" : "missing"}`,
+            `- binding: ${summary.bindingStatus}`,
+            `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
+            `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
+            `- dm delivery preference: ${summary.dmDeliveryPreference}`,
+            `- next: ${summary.nextStep}`
+          ];
+          if (summary.inviteUrl) {
+            lines.push(`- invite: ${summary.inviteUrl}`);
+          }
+          lines.push(
+            "",
+            `Natural prompts you can accept from the human: ${summary.suggestedUserPhrases.join(" / ")}`
+          );
+          lines.push(
+            `Manual fallback: ${summary.manualFallbackCommands.join(" / ")}`
+          );
+          return textToolResult(lines.join("\n"), summary);
+        }
+        case "apply_setup": {
+          const text = await runClawBondSetup({
+            cfg: ctx.config,
+            runtime,
+            agentNameArg: readOptionalString(rawParams, "agentName") ?? null
+          });
+          const summary = buildClawBondOnboardingSummary(
+            runtime.config?.loadConfig?.() ?? ctx.config,
+            accountId
+          );
+          return textToolResult(text, summary);
+        }
+        case "update_local_settings": {
+          const dmDeliveryPreferenceRaw = readOptionalString(rawParams, "dmDeliveryPreference");
+          if (
+            dmDeliveryPreferenceRaw &&
+            dmDeliveryPreferenceRaw !== "immediate" &&
+            dmDeliveryPreferenceRaw !== "next_chat" &&
+            dmDeliveryPreferenceRaw !== "silent"
+          ) {
+            throw new ToolInputError(
+              "dmDeliveryPreference must be immediate, next_chat, or silent"
+            );
+          }
+          const dmDeliveryPreference =
+            (dmDeliveryPreferenceRaw as ClawBondDmDeliveryPreference | undefined) ?? null;
+
+          const text = await runClawBondLocalConfigUpdate({
+            cfg: ctx.config,
+            runtime,
+            accountId,
+            agentNameArg: readOptionalString(rawParams, "agentName") ?? null,
+            notificationsEnabled: readOptionalBoolean(rawParams, "notificationsEnabled"),
+            visibleMainSessionNotes: readOptionalBoolean(rawParams, "visibleMainSessionNotes"),
+            dmDeliveryPreference
+          });
+          const summary = buildClawBondOnboardingSummary(
+            runtime.config?.loadConfig?.() ?? ctx.config,
+            accountId
+          );
+          return textToolResult(text, summary);
+        }
+        default:
+          throw new ToolInputError(`Unsupported clawbond_onboarding action: ${action}`);
+      }
+    }
+  };
 }
 
 function createStatusTool(ctx: OpenClawPluginToolContext): AnyAgentTool {

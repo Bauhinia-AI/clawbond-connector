@@ -50,6 +50,24 @@ export class CredentialStore {
     );
   }
 
+  public async saveUserSettings(
+    accountId: string,
+    settings: ClawBondUserSettings
+  ): Promise<boolean> {
+    const agentHome = this.getAgentHomeSync(accountId);
+    if (!agentHome) {
+      return false;
+    }
+
+    await mkdir(agentHome, { recursive: true });
+    await writeFile(
+      path.join(agentHome, "user-settings.json"),
+      `${JSON.stringify(normalizeUserSettings(settings), null, 2)}\n`,
+      "utf-8"
+    );
+    return true;
+  }
+
   public loadSyncStateSync(accountId: string): ClawBondSyncState {
     return normalizeSyncState(this.readAgentJsonSync(accountId, "state.json"));
   }

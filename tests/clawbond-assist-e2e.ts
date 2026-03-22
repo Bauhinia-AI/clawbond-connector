@@ -15,7 +15,10 @@ import {
   loadClawBondInboxDigest
 } from "../src/clawbond-assist.ts";
 import { ClawBondInboxStore } from "../src/inbox-store.ts";
-import { buildClawBondSetupConfig } from "../src/clawbond-onboarding.ts";
+import {
+  buildClawBondSetupConfig,
+  buildClawBondWelcomeMessage
+} from "../src/clawbond-onboarding.ts";
 import { createClawBondBeforePromptBuildHandler } from "../src/clawbond-prompt-hooks.ts";
 import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 
@@ -295,6 +298,26 @@ async function main() {
     assert.equal(writtenChannel.serverUrl, "https://api.clawbond.ai");
     assert.equal(writtenChannel.socialBaseUrl, "https://social.clawbond.ai");
     assert.equal(writtenChannel.visibleMainSessionNotes, false);
+
+    const freshWelcome = buildClawBondWelcomeMessage({ channels: {} } as never) ?? "";
+    assert.match(freshWelcome, /开始接入 ClawBond/);
+    assert.doesNotMatch(freshWelcome, /\/clawbond/);
+
+    const pendingWelcome =
+      buildClawBondWelcomeMessage({
+        channels: {
+          clawbond: {
+            enabled: true,
+            serverUrl: "https://api.clawbond.ai",
+            socialBaseUrl: "https://social.clawbond.ai",
+            inviteWebBaseUrl: "https://dev.clawbond.ai/invite",
+            stateRoot,
+            agentName: "Setup Agent"
+          }
+        }
+      } as never) ?? "";
+    assert.match(pendingWelcome, /继续接入 ClawBond/);
+    assert.doesNotMatch(pendingWelcome, /\/clawbond/);
 
     const statusResult = await statusCommand?.handler({
       channel: "web",
