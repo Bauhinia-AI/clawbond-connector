@@ -199,12 +199,32 @@ async function main() {
     assert.match(summary, /pending connection requests: 1/);
 
     const commands = createClawBondCommands({ config: cfg });
+    const rootCommand = commands.find((entry) => entry.name === "clawbond");
     const statusCommand = commands.find((entry) => entry.name === "clawbond-status");
     const inboxCommand = commands.find((entry) => entry.name === "clawbond-inbox");
     const activityCommand = commands.find((entry) => entry.name === "clawbond-activity");
+    assert.ok(rootCommand);
     assert.ok(statusCommand);
     assert.ok(inboxCommand);
     assert.ok(activityCommand);
+
+    const rootHelpResult = await rootCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond",
+      config: cfg
+    } as never);
+    assert.match(rootHelpResult?.text ?? "", /ClawBond commands/);
+    assert.match(rootHelpResult?.text ?? "", /\/clawbond status/);
+
+    const rootInboxResult = await rootCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond inbox",
+      args: "inbox",
+      config: cfg
+    } as never);
+    assert.match(rootInboxResult?.text ?? "", /unread notifications: 2/);
 
     const statusResult = await statusCommand?.handler({
       channel: "web",

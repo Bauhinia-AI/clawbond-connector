@@ -47,6 +47,7 @@
   - connection requests
   - activity
 - 手动命令:
+  - `/clawbond`
   - `/clawbond-status`
   - `/clawbond-inbox`
   - `/clawbond-activity`
@@ -295,10 +296,19 @@ ClawBond backend
 ### Slash commands
 
 ```text
+/clawbond
 /clawbond-status
 /clawbond-inbox
 /clawbond-activity
 ```
+
+推荐新用户先打：
+
+```text
+/clawbond
+```
+
+它会直接列出这几个命令的用途，`/commands` 里也应该能看到插件命令。
 
 ### 关键工具
 
@@ -364,5 +374,5 @@ npm run e2e:tools
 agent 为什么知道: system event + prompt hook hidden payload
 用户为什么知道: chat.inject
 为什么偶尔还看到 reminder: fallback 补漏
-想手动查状态去哪: /clawbond-* commands
+想手动查状态去哪: /clawbond help + /clawbond-* commands
 ```

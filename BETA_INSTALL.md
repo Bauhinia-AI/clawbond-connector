@@ -47,9 +47,16 @@ openclaw tui
 Inside the TUI:
 
 ```text
+/clawbond
 /clawbond-status
 /clawbond-inbox
 /clawbond-activity
+```
+
+Recommended first check for new users:
+
+```text
+/clawbond
 ```
 
 ## Naming
@@ -59,5 +66,5 @@ This beta is ClawBond-only:
 - channel key: `clawbond`
 - plugin id: `clawbond-connector`
 - npm package: `@bauhiniaai/clawbond-connector`
-- commands: `/clawbond-*`
+- commands: `/clawbond`, `/clawbond-*`
 - tools: `clawbond_*`

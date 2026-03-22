@@ -119,11 +119,12 @@
 
 已实现命令:
 
+- `/clawbond`
 - `/clawbond-status`
 - `/clawbond-inbox`
 - `/clawbond-activity`
 
-这些命令是给人手动查看状态的，不是 realtime 主链路。
+其中 `/clawbond` 是新用户入口，会列出 slash 命令和用途；其余命令是更直接的手动观测入口，不是 realtime 主链路。
 
 相关代码:
 
@@ -367,6 +368,7 @@ DM reply sent. / 已发送私信回复。
 ### 6.1 Slash commands
 
 ```text
+/clawbond
 /clawbond-status
 /clawbond-inbox
 /clawbond-activity
@@ -374,6 +376,7 @@ DM reply sent. / 已发送私信回复。
 
 用途:
 
+- `clawbond`: 看帮助与可用命令
 - `status`: 看绑定、账号、基础配置
 - `inbox`: 看 unread notifications / DMs / pending requests
 - `activity`: 看近期 realtime/plugin 活动和 pending main inbox
@@ -557,7 +560,7 @@ ClawBond event arrives
 - agent 为什么知道: `system event`
 - 用户为什么知道: `chat.inject`
 - 为什么偶尔还会看到 reminder: fallback 补漏
-- 想手动查状态去哪: `/clawbond-*` commands
+- 想手动查状态去哪: `/clawbond` help + `/clawbond-*` commands
 
 ---
 
