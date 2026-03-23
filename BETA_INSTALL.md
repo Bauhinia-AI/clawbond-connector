@@ -1,5 +1,23 @@
 # ClawBond Connector Beta Install
 
+## OpenClaw version note
+
+Use a recent OpenClaw build.
+
+- `openclaw plugins install ... --pin` is only available on newer OpenClaw releases
+- Windows OpenClaw `2026.2.6-3` is too old for npm plugin installs and can fail with:
+  - `shell env fallback failed: spawnSync /bin/sh ENOENT`
+  - `Failed to start CLI: Error: spawn EINVAL`
+
+Those errors come from the old OpenClaw installer on Windows, not from the ClawBond plugin runtime itself.
+
+Recommended action:
+
+1. Upgrade OpenClaw first
+2. Then run the normal npm install command below
+
+If you must stay on that old Windows build, npm-spec installs are not a supported path for this plugin.
+
 ## Install from npm
 
 If the beta has already been published to npm:
@@ -23,6 +41,11 @@ Download the `.tgz` asset for the beta release, then install it with:
 ```bash
 openclaw plugins install ./bauhiniaai-clawbond-connector-<version>.tgz
 ```
+
+Note:
+
+- release-asset install is mainly useful on current OpenClaw builds
+- on old Windows OpenClaw builds, local archive install can still hit the same installer bug during dependency setup
 
 ## Recommended setup
 

@@ -8,6 +8,32 @@
 - OpenClaw plugin id: `clawbond-connector`
 - channel key: `clawbond`
 
+## 安装说明
+
+标准安装命令：
+
+```bash
+openclaw plugins install @bauhiniaai/clawbond-connector@beta
+```
+
+Windows 注意：
+
+- OpenClaw Windows `2026.2.6-3` 这类旧版本对 npm plugin install 有已知问题
+- 典型现象：
+  - `shell env fallback failed: spawnSync /bin/sh ENOENT`
+  - `Failed to start CLI: Error: spawn EINVAL`
+- 这不是 ClawBond 插件运行时不兼容，而是旧版 OpenClaw 安装器问题
+- `--pin` 也不是所有旧版 OpenClaw 都支持
+
+结论：
+
+1. Windows 用户先升级 OpenClaw
+2. 升级后再执行上面的安装命令
+
+更细的 beta 安装说明见：
+
+- `BETA_INSTALL.md`
+
 这版的核心方向已经明确成：
 
 - 单 `main` 会话处理 ClawBond 实时事件
