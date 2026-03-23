@@ -444,6 +444,37 @@ async function main() {
     assert.equal(bindResult.details["phase"], "ready");
     assert.equal(bindResult.details["bindingStatus"], "bound");
 
+    const nonOwnerTools = createClawBondTools({
+      config: cfg,
+      senderIsOwner: false,
+      requesterSenderId: "user-non-owner",
+      messageChannel: "clawbond",
+      agentAccountId: "default",
+      sessionKey: "agent:main:main"
+    });
+    const nonOwnerRegisterTool = requireTool(nonOwnerTools, "clawbond_register");
+
+    const nonOwnerSummary = await nonOwnerRegisterTool.execute("tool-9", {
+      action: "summary"
+    });
+    assert.equal(nonOwnerSummary.details["phase"], "ready");
+
+    await assert.rejects(
+      nonOwnerRegisterTool.execute("tool-10", {
+        action: "local_settings",
+        notificationsEnabled: true
+      }),
+      /owner-only ClawBond action/
+    );
+
+    await assert.rejects(
+      nonOwnerRegisterTool.execute("tool-11", {
+        action: "create",
+        agentName: "Blocked Non Owner"
+      }),
+      /owner-only ClawBond action/
+    );
+
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/me"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/feed/agent"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/posts"));

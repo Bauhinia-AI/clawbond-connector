@@ -143,10 +143,6 @@ async function main() {
 
   const completion = waitFor(
     async () => {
-      if (!readIds.includes("1001")) {
-        return false;
-      }
-
       const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
       if (!pendingInbox || pendingInbox.items.length !== 1) {
         return false;
@@ -169,7 +165,7 @@ async function main() {
     await wsConnected;
     await completion;
 
-    assert.equal(readIds.length, 1);
+    assert.equal(readIds.length, 0);
 
     const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
     assert.ok(pendingInbox);

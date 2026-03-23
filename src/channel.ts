@@ -16,6 +16,8 @@ import { describeAccount, isConfigured, resolveAccount, listAccountIds } from ".
 import { CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import { sanitizeLogString, sanitizeLogValue } from "./log-sanitizer.ts";
+import { clearClawBondMainWakeQueue, enqueueClawBondMainWake } from "./main-wake-store.ts";
+import { resolveStructuredIncomingPrompt } from "./message-envelope.ts";
 import { getClawBondRuntime } from "./runtime.ts";
 import { NotificationClient } from "./notification-client.ts";
 import {
@@ -39,6 +41,7 @@ const PLATFORM_LABEL = "ClawBond";
 const DEFAULT_ACCOUNT_ID = "default";
 const MAIN_SESSION_KEY = "agent:main:main";
 const MAIN_WAKE_DEBOUNCE_MS = 400;
+const DM_MERGED_WAKE_COOLDOWN_MS = 90_000;
 
 const runtimeClients = new Map<string, PlatformClient>();
 const pendingMainWakeTimers = new Map<string, NodeJS.Timeout>();
@@ -200,6 +203,10 @@ export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
               reason === "reconnect"
                 ? refreshRuntimeToken("reconnect ClawBond realtime gateway")
                 : activeAccount.runtimeToken.trim(),
+            pollMessages: (after, limit) =>
+              requestWithRuntimeToken("poll messages", (accessToken) =>
+                serverApi.pollMessages(accessToken, after, limit)
+              ),
             loadBindStatus: () =>
               requestWithRuntimeToken("bind status", (accessToken) =>
                 bootstrapClient.getBindStatus(accessToken)
@@ -533,6 +540,10 @@ async function runConnectedSession(params: {
   store: CredentialStore;
   bootstrapClient: BootstrapClient;
   resolveRuntimeToken: (reason: "initial_connect" | "reconnect") => Promise<string>;
+  pollMessages: (after: string | undefined, limit: number) => Promise<{
+    data: unknown[];
+    pagination?: unknown;
+  }>;
   loadBindStatus: () => Promise<ClawBondAgentBindStatus>;
   loadProfile: () => Promise<ClawBondAgentSelfProfile>;
   resolvePeerLabel: (message: ClawBondInvokeMessage) => Promise<string | null>;
@@ -545,6 +556,25 @@ async function runConnectedSession(params: {
         stop: () => void;
       }
     | null = null;
+  let initialRealtimeConnected = false;
+  let dmCatchUpPromise: Promise<void> | null = null;
+
+  const runRuntimeDmCatchUp = async (reason: "initial_start" | "reconnect") => {
+    if (!dmCatchUpPromise) {
+      dmCatchUpPromise = syncRuntimeDmCatchUp({
+        ctx: params.ctx,
+        account: params.account,
+        store: params.store,
+        pollMessages: params.pollMessages,
+        resolvePeerLabel: params.resolvePeerLabel,
+        reason
+      }).finally(() => {
+        dmCatchUpPromise = null;
+      });
+    }
+
+    return dmCatchUpPromise;
+  };
 
   try {
     client = new PlatformClient(params.account, {
@@ -575,13 +605,19 @@ async function runConnectedSession(params: {
     });
 
     client.on("connected", () => {
-      void notificationClient!
-        .onRealtimeConnected()
-        .catch((error) => {
-          logWarn(params.ctx, "[clawbond-connector] notification sync after realtime reconnect failed", {
-            error: stringifyError(error)
-          });
+      if (!initialRealtimeConnected) {
+        initialRealtimeConnected = true;
+        return;
+      }
+
+      void Promise.all([
+        notificationClient!.onRealtimeConnected(),
+        runRuntimeDmCatchUp("reconnect")
+      ]).catch((error) => {
+        logWarn(params.ctx, "[clawbond-connector] runtime catch-up after realtime reconnect failed", {
+          error: stringifyError(error)
         });
+      });
     });
 
     client.on("disconnected", () => {
@@ -618,6 +654,13 @@ async function runConnectedSession(params: {
     await client.start();
     runtimeClients.set(params.account.accountId, client);
     await notificationClient.start({ enablePollingFallback: false });
+    try {
+      await runRuntimeDmCatchUp("initial_start");
+    } catch (error) {
+      logWarn(params.ctx, "[clawbond-connector] initial runtime DM catch-up failed", {
+        error: stringifyError(error)
+      });
+    }
 
     setAccountStatus(params.ctx, params.account, {
       phase: "connected",
@@ -877,7 +920,20 @@ async function dispatchPlatformInvoke(
         : `Queued ${describeSourceKind(message)} from ${peer.peerLabel} for main-session handling`,
       preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
     });
-    scheduleMainSessionWake(ctx, account, [queued.item.id]);
+
+    const skipDmWakeByCooldown = shouldSkipMergedDmWakeByCooldown(queued, sourceKind);
+    if (skipDmWakeByCooldown) {
+      logInfo(ctx, "[clawbond-connector] skipped merged DM wake due to cooldown", {
+        accountId: account.accountId,
+        itemId: queued.item.id,
+        peerId: queued.item.peerId,
+        conversationId: queued.item.conversationId,
+        wakeRequestedAt: queued.item.wakeRequestedAt,
+        wakeCount: queued.item.wakeCount
+      });
+    } else {
+      scheduleMainSessionWake(ctx, account, [queued.item.id]);
+    }
   } else {
     logInfo(ctx, "[clawbond-connector] skipped duplicate pending inbox item", {
       accountId: account.accountId,
@@ -892,6 +948,26 @@ async function dispatchPlatformInvoke(
     lastInboundAt: Date.now(),
     lastError: null
   });
+}
+
+function shouldSkipMergedDmWakeByCooldown(
+  queued: { created: boolean; merged: boolean; item: { wakeRequestedAt: string | null; wakeCount: number } },
+  sourceKind: ClawBondInvokeMessage["sourceKind"]
+): boolean {
+  if (sourceKind !== "message" || !queued.merged) {
+    return false;
+  }
+
+  if ((queued.item.wakeCount ?? 0) <= 0) {
+    return false;
+  }
+
+  const lastWakeAt = Date.parse(queued.item.wakeRequestedAt ?? "");
+  if (Number.isNaN(lastWakeAt)) {
+    return false;
+  }
+
+  return Date.now() - lastWakeAt < DM_MERGED_WAKE_COOLDOWN_MS;
 }
 
 function markOutboundSuccess(ctx: StartAccountContext, account: ClawBondAccount) {
@@ -992,6 +1068,7 @@ function clearScheduledMainSessionWork(accountId: string) {
     pendingMainWakeTimers.delete(accountId);
   }
   pendingMainWakeItemIds.delete(accountId);
+  clearClawBondMainWakeQueue(accountId);
 }
 
 async function triggerMainSessionWake(
@@ -1010,6 +1087,11 @@ async function triggerMainSessionWake(
   if (pendingCount === 0 || wakeItems.length === 0) {
     return;
   }
+
+  enqueueClawBondMainWake(
+    account.accountId,
+    wakeItems.map((item) => item.id)
+  );
 
   if (account.visibleMainSessionNotes) {
     queueMainSessionVisibleNote(buildMainWakeVisibleNote(wakeItems), {
@@ -1040,7 +1122,7 @@ async function triggerMainSessionWake(
     });
 
     await recordMainWakeActivity(ctx, account, dmItems, "main_run_requested", {
-      summary: "Sent direct main-session ClawBond DM handoff",
+      summary: "Queued direct main-session ClawBond DM handoff",
       preview: truncateActivityPreview(chatSendText)
     });
   }
@@ -1061,7 +1143,7 @@ async function triggerMainSessionWake(
     });
 
     await recordMainWakeActivity(ctx, account, nonDmItems, "main_run_requested", {
-      summary: "Requested immediate main-session ClawBond wake",
+      summary: "Queued immediate main-session ClawBond wake",
       preview: truncateActivityPreview(wakeEventText)
     });
   }
@@ -1142,19 +1224,19 @@ function buildMainWakeVisibleNote(
   }>
 ): string {
   if (items.length !== 1) {
-    return `Received ${items.length} new ClawBond items. Agent notified and handling now. / 收到 ${items.length} 条新的 ClawBond 消息，已通知 agent，正在处理。`;
+    return `Received ${items.length} new ClawBond items. Agent notified. / 收到 ${items.length} 条新的 ClawBond 消息，已通知 agent。`;
   }
 
   const [item] = items;
   switch (item.sourceKind) {
     case "notification":
-      return `New notification from ${item.peerLabel}. Agent notified and handling now. / 收到来自 ${item.peerLabel} 的新通知，已通知 agent，正在处理。`;
+      return `New notification from ${item.peerLabel}. Agent notified. / 收到来自 ${item.peerLabel} 的新通知，已通知 agent。`;
     case "connection_request":
     case "connection_request_response":
-      return `Connection request update from ${item.peerLabel}. Agent notified and handling now. / 收到来自 ${item.peerLabel} 的连接请求更新，已通知 agent，正在处理。`;
+      return `Connection request update from ${item.peerLabel}. Agent notified. / 收到来自 ${item.peerLabel} 的连接请求更新，已通知 agent。`;
     case "message":
     default:
-      return `New DM from ${item.peerLabel}. Agent notified and handling now. / 收到来自 ${item.peerLabel} 的新私信，已通知 agent，正在处理。`;
+      return `New DM from ${item.peerLabel}. Agent notified. / 收到来自 ${item.peerLabel} 的新私信，已通知 agent。`;
   }
 }
 
@@ -1376,6 +1458,62 @@ async function recordMainWakeActivity(
   }
 }
 
+async function syncRuntimeDmCatchUp(params: {
+  ctx: StartAccountContext;
+  account: ClawBondAccount;
+  store: CredentialStore;
+  pollMessages: (after: string | undefined, limit: number) => Promise<{
+    data: unknown[];
+    pagination?: unknown;
+  }>;
+  resolvePeerLabel: (message: ClawBondInvokeMessage) => Promise<string | null>;
+  reason: "initial_start" | "reconnect";
+}) {
+  const accountId = params.account.accountId;
+  const syncState = params.store.loadSyncStateSync(accountId);
+  let cursor = syncState.last_seen_dm_cursor ?? undefined;
+  let processed = 0;
+  let pageCount = 0;
+
+  while (pageCount < 5) {
+    throwIfAborted(params.ctx.abortSignal);
+
+    const result = await params.pollMessages(cursor, 20);
+    const messages = normalizePolledDmMessages(result.data);
+    const nextCursor = readNextCursor(result.pagination);
+
+    for (const message of messages) {
+      await dispatchPlatformInvoke(
+        params.ctx,
+        params.account,
+        buildInvokeMessageFromPolledDm(params.account, message),
+        params.resolvePeerLabel
+      );
+      processed += 1;
+    }
+
+    if (nextCursor && nextCursor !== syncState.last_seen_dm_cursor) {
+      syncState.last_seen_dm_cursor = nextCursor;
+      await params.store.saveSyncState(accountId, syncState);
+    }
+
+    if (messages.length === 0 || !nextCursor || nextCursor === cursor) {
+      break;
+    }
+
+    cursor = nextCursor;
+    pageCount += 1;
+  }
+
+  if (processed > 0) {
+    logInfo(params.ctx, "[clawbond-connector] runtime DM catch-up completed", {
+      accountId,
+      reason: params.reason,
+      processed
+    });
+  }
+}
+
 function resolveDeliveryPath(message: ClawBondInvokeMessage): ClawBondInvokeMessage["deliveryPath"] {
   if (message.deliveryPath) {
     return message.deliveryPath;
@@ -1518,6 +1656,92 @@ function describeSourceKind(message: ClawBondInvokeMessage): string {
     default:
       return "DM";
   }
+}
+
+interface PolledDmMessage {
+  id: string;
+  senderId: string;
+  conversationId: string;
+  content: string;
+  createdAt: string;
+}
+
+function normalizePolledDmMessages(items: unknown): PolledDmMessage[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return [];
+    }
+
+    const candidate = item as Record<string, unknown>;
+    const id = readRecordString(candidate, "id");
+    const senderId =
+      readRecordString(candidate, "sender_id") || readRecordString(candidate, "senderId");
+    const conversationId =
+      readRecordString(candidate, "conversation_id") || readRecordString(candidate, "conversationId");
+    const content = readRecordString(candidate, "content");
+    const createdAt =
+      readRecordString(candidate, "created_at") || readRecordString(candidate, "createdAt");
+
+    if (!id || !senderId || !content || !createdAt) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        senderId,
+        conversationId,
+        content,
+        createdAt
+      }
+    ];
+  });
+}
+
+function buildInvokeMessageFromPolledDm(
+  account: ClawBondAccount,
+  message: PolledDmMessage
+): ClawBondInvokeMessage {
+  const incoming = resolveStructuredIncomingPrompt(account, {
+    event: "message",
+    from_agent_id: message.senderId,
+    conversation_id: message.conversationId || undefined,
+    content: message.content,
+    sender_type: "agent",
+    timestamp: message.createdAt
+  });
+
+  return {
+    type: "invoke",
+    requestId: `poll-${message.id}`,
+    conversationId:
+      message.conversationId || buildPolledConversationId(account.agentId, message.senderId),
+    timestamp: message.createdAt,
+    sourceAgentId: message.senderId,
+    sourceKind: "message",
+    prompt: incoming.prompt,
+    rawPrompt: message.content,
+    structuredEnvelope: incoming.structuredEnvelope,
+    deliveryPath: "message_polling"
+  };
+}
+
+function buildPolledConversationId(agentA: string, agentB: string): string {
+  return [agentA, agentB].sort().join(":");
+}
+
+function readNextCursor(pagination: unknown): string | undefined {
+  if (!pagination || typeof pagination !== "object" || Array.isArray(pagination)) {
+    return undefined;
+  }
+
+  const candidate = pagination as Record<string, unknown>;
+  const nextCursor = candidate.next_cursor ?? candidate.nextCursor;
+  return typeof nextCursor === "string" && nextCursor.trim() ? nextCursor.trim() : undefined;
 }
 
 function truncateActivityPreview(value: string, limit = 88): string {

@@ -139,6 +139,24 @@ export function ensureToolAccess(
   );
 }
 
+export function ensureOwnerOnlyToolAccess(
+  ctx: OpenClawPluginToolContext,
+  operation: string,
+  mode: "read" | "write" = "write"
+) {
+  if (!ctx.requesterSenderId) {
+    return;
+  }
+
+  if (ctx.senderIsOwner === true) {
+    return;
+  }
+
+  throw new ToolAuthorizationError(
+    `Not allowed to ${mode} owner-only ClawBond action for ${operation} from non-owner sender`
+  );
+}
+
 export function clampLimit(limit: number | undefined, fallback: number, max = 100): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) {
     return fallback;

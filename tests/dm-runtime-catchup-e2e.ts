@@ -8,13 +8,17 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 
 import { clawbondPlugin } from "../src/channel.ts";
+import {
+  loadClawBondActivitySnapshot,
+  loadClawBondPendingMainInboxSnapshot
+} from "../src/clawbond-assist.ts";
 import { resolveAccount } from "../src/config.ts";
 import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
-  const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-dm-visible-note-e2e-"));
-  const wakeDir = await mkdtemp(path.join(tmpdir(), "clawbond-dm-visible-openclaw-"));
+  const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-dm-runtime-catchup-e2e-"));
+  const wakeDir = await mkdtemp(path.join(tmpdir(), "clawbond-dm-catchup-openclaw-"));
   const wakeLogPath = path.join(wakeDir, "wake.log");
   const fakeOpenClawPath = path.join(wakeDir, "openclaw");
   const originalOpenClawBin = process.env.CLAWBOND_OPENCLAW_BIN;
@@ -28,27 +32,49 @@ async function main() {
   );
   await chmod(fakeOpenClawPath, 0o755);
 
+  const polledRequests: string[] = [];
   const wss = new WebSocketServer({ noServer: true });
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
-    if (req.method === "GET" && url.pathname === "/api/agent/notifications") {
+    if (req.method === "GET" && url.pathname === "/api/agent/messages/poll") {
+      assert.equal(req.headers.authorization, "Bearer rt_test");
+      polledRequests.push(url.searchParams.get("after") ?? "");
+
+      const after = url.searchParams.get("after");
       res.writeHead(200, { "Content-Type": "application/json" });
+      if (!after) {
+        res.end(
+          JSON.stringify({
+            code: 200,
+            data: [
+              {
+                id: "msg-3001",
+                conversation_id: "conv-3001",
+                sender_id: "267736442501861376",
+                content: "catchup hello from clawbond",
+                created_at: "2026-03-23T07:00:00.000Z"
+              }
+            ],
+            message: "success",
+            pagination: { next_cursor: "msg-3001", has_more: false }
+          })
+        );
+        return;
+      }
+
       res.end(
         JSON.stringify({
           code: 200,
           data: [],
           message: "success",
-          pagination: { total: 0, page: 1, page_size: 20, total_pages: 0 }
+          pagination: { next_cursor: "msg-3001", has_more: false }
         })
       );
       return;
     }
 
-    if (
-      req.method === "GET" &&
-      url.pathname === "/api/conversations/conv-2001/messages"
-    ) {
+    if (req.method === "GET" && url.pathname === "/api/conversations/conv-3001/messages") {
       assert.equal(req.headers.authorization, "Bearer rt_test");
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
@@ -56,16 +82,16 @@ async function main() {
           code: 200,
           data: [
             {
-              id: "msg-2001",
+              id: "msg-3001",
               sender_id: "267736442501861376",
               sender_nickname: "galaxy0-fresh-bind-test",
-              content: "hello from clawbond",
+              content: "catchup hello from clawbond",
               msg_type: "text",
-              created_at: "2026-03-21T07:00:00.000Z"
+              created_at: "2026-03-23T07:00:00.000Z"
             }
           ],
           message: "success",
-          pagination: { next_cursor: "msg-2001", has_more: false }
+          pagination: { next_cursor: "msg-3001", has_more: false }
         })
       );
       return;
@@ -96,18 +122,12 @@ async function main() {
   }
 
   const wsConnected = new Promise<void>((resolve) => {
-    wss.once("connection", (ws) => {
-      ws.send(
-        JSON.stringify({
-          event: "message",
-          from_agent_id: "267736442501861376",
-          conversation_id: "conv-2001",
-          content: "hello from clawbond",
-          sender_type: "agent",
-          timestamp: "2026-03-21T07:00:00.000Z"
-        })
-      );
+    wss.once("connection", (ws, req) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+      assert.equal(requestUrl.pathname, "/ws");
+      assert.equal(requestUrl.searchParams.get("token"), "rt_test");
       resolve();
+      ws.on("message", () => undefined);
     });
   });
 
@@ -121,11 +141,8 @@ async function main() {
         bootstrapEnabled: false,
         runtimeToken: "rt_test",
         agentId: "agent-local",
-        agentName: "Realtime DM Test Agent",
-        notificationsEnabled: true,
-        notificationApiUrl: `http://127.0.0.1:${address.port}`,
-        notificationAuthToken: "agent_jwt_test",
-        notificationPollIntervalMs: 10_000,
+        agentName: "Runtime Catchup Test Agent",
+        notificationsEnabled: false,
         bindingStatus: "bound",
         visibleMainSessionNotes: true
       }
@@ -184,6 +201,11 @@ async function main() {
   try {
     await wsConnected;
     await waitFor(async () => {
+      const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
+      if (!pendingInbox || pendingInbox.items.length !== 1) {
+        return false;
+      }
+
       try {
         const wakeLog = await readFile(wakeLogPath, "utf-8");
         return (
@@ -191,9 +213,7 @@ async function main() {
           wakeLog.includes("gateway call chat.send --params") &&
           !wakeLog.includes("system event --mode now --text") &&
           wakeLog.includes(CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE) &&
-          wakeLog.includes("This is not a heartbeat poll. Do not reply with HEARTBEAT_OK.") &&
           wakeLog.includes("New DM from galaxy0-fresh-bind-test. Agent notified.") &&
-          !wakeLog.includes("Handling new DM from galaxy0-fresh-bind-test now.") &&
           !wakeLog.includes("New DM from galaxy0-fresh-bind-test. Agent notified and handling now.")
         );
       } catch {
@@ -201,7 +221,25 @@ async function main() {
       }
     }, 5000);
 
-    console.log("dm-realtime-visible-note E2E passed");
+    assert.deepEqual(polledRequests, ["", "msg-3001"]);
+
+    const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
+    assert.ok(pendingInbox);
+    assert.equal(pendingInbox?.items.length, 1);
+    assert.equal(pendingInbox?.items[0]?.conversationId, "conv-3001");
+    assert.equal(pendingInbox?.items[0]?.deliveryPath, "message_polling");
+
+    const activitySnapshot = loadClawBondActivitySnapshot(cfg);
+    assert.ok(activitySnapshot);
+    assert.equal(
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "main_run_requested" && entry.deliveryPath === "message_polling"
+      ),
+      true
+    );
+    assert.equal(activitySnapshot?.pendingTraces[0]?.deliveryPath, "message_polling");
+
+    console.log("dm-runtime-catchup E2E passed");
   } finally {
     abortController.abort();
     await runPromise;
@@ -238,7 +276,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 
-  throw new Error("Timed out waiting for visible DM note");
+  throw new Error("Timed out waiting for runtime DM catch-up");
 }
 
 await main();

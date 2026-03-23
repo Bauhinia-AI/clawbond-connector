@@ -14,6 +14,7 @@ import {
 } from "../src/clawbond-assist.ts";
 import { createClawBondBeforePromptBuildHandler } from "../src/clawbond-prompt-hooks.ts";
 import { resolveAccount } from "../src/config.ts";
+import { ClawBondInboxStore } from "../src/inbox-store.ts";
 import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
@@ -181,10 +182,6 @@ async function main() {
   }
 
   const completion = waitFor(async () => {
-    if (!readIds.includes("ws-1001")) {
-      return false;
-    }
-
     const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
     if (!pendingInbox || pendingInbox.items.length !== 1) {
       return false;
@@ -197,12 +194,10 @@ async function main() {
           wakeLog.includes("system event --mode now --text") &&
           !wakeLog.includes("gateway call chat.send --params") &&
           wakeLog.includes(CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE) &&
-          wakeLog.includes(
-            "New notification from user:human-001. Agent notified and handling now."
-          ) &&
-          !wakeLog.includes("Handling new notification from user:human-001 now.") &&
-          !wakeLog.includes("New notification from user:human-001. Agent notified.") &&
-          wakeLog.includes("notification from user:human-001.") &&
+          wakeLog.includes("New notification from") &&
+          wakeLog.includes("Agent notified") &&
+          !wakeLog.includes("Handling new notification from") &&
+          wakeLog.includes("notification from") &&
           !wakeLog.includes("notificationId: ws-1001") &&
           !wakeLog.includes("请实时处理这条推送。")
         );
@@ -215,7 +210,7 @@ async function main() {
     await wsConnected;
     await completion;
 
-    assert.equal(readIds.length, 1);
+    assert.equal(readIds.length, 0);
     assert.equal(typeof latestStatus.lastInboundAt, "number");
 
     const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
@@ -249,6 +244,19 @@ async function main() {
     assert.equal(activitySnapshot?.pendingTraces[0]?.traceId, "notification:ws-1001");
     assert.equal(activitySnapshot?.pendingTraces[0]?.deliveryPath, "notification_realtime");
 
+    await new ClawBondInboxStore(stateRoot).enqueue("default", {
+      fingerprint: "notification:older-pending",
+      traceId: "notification:older-pending",
+      sourceKind: "notification",
+      peerId: "human-older",
+      peerLabel: "user:human-older",
+      summary: "Pending notification from user:human-older",
+      content: "This older pending item should stay out of the current wake injection.",
+      receivedAt: "2026-03-18T09:59:00.000Z",
+      deliveryPath: "notification_polling",
+      notificationId: "older-pending"
+    });
+
     const hook = createClawBondBeforePromptBuildHandler({
       config: cfg,
       logger: { warn: () => undefined }
@@ -268,6 +276,7 @@ async function main() {
     assert.match(hookResult?.prependSystemContext ?? "", /ClawBond internal realtime payload/);
     assert.match(hookResult?.prependSystemContext ?? "", /notificationId: ws-1001/);
     assert.match(hookResult?.prependSystemContext ?? "", /请实时处理这条推送/);
+    assert.doesNotMatch(hookResult?.prependSystemContext ?? "", /notificationId: older-pending/);
     assert.doesNotMatch(hookResult?.prependContext ?? "", /ClawBond reminder \/ 消息提醒/);
 
     const activityAfterHook = loadClawBondActivitySnapshot(cfg);
@@ -283,7 +292,8 @@ async function main() {
       { sessionId: "agent:main:main", sessionKey: "agent:main:main", trigger: "user", channelId: "web" }
     );
     assert.equal(followupHookResult?.prependContext, undefined);
-    assert.equal(followupHookResult?.prependSystemContext, undefined);
+    assert.match(followupHookResult?.prependSystemContext ?? "", /ClawBond reminder \/ 消息提醒/);
+    assert.match(followupHookResult?.prependSystemContext ?? "", /notification ref \/ 通知标识: older-pending/);
 
     const staleHistoryFollowupHookResult = await hook(
       {
@@ -296,7 +306,7 @@ async function main() {
       { sessionId: "agent:main:main", sessionKey: "agent:main:main", trigger: "user", channelId: "web" }
     );
     assert.equal(staleHistoryFollowupHookResult?.prependContext, undefined);
-    assert.equal(staleHistoryFollowupHookResult?.prependSystemContext, undefined);
+    assert.match(staleHistoryFollowupHookResult?.prependSystemContext ?? "", /ClawBond reminder \/ 消息提醒/);
 
     console.log("notification-realtime E2E passed");
   } finally {

@@ -20,6 +20,7 @@ import {
   buildClawBondWelcomeMessage
 } from "../src/clawbond-onboarding.ts";
 import { createClawBondBeforePromptBuildHandler } from "../src/clawbond-prompt-hooks.ts";
+import { enqueueClawBondMainWake } from "../src/main-wake-store.ts";
 import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 
 async function main() {
@@ -189,6 +190,13 @@ async function main() {
       conversationId: "conv-1",
       receivedAt: "2026-03-19T09:03:00Z"
     });
+    const primaryPendingItemId = inboxStore
+      .listPendingSync("default", 10)
+      .find((item) => item.peerId === "agent-2")
+      ?.id;
+    assert.ok(primaryPendingItemId);
+    const pendingItemIds = inboxStore.listPendingSync("default", 10).map((item) => item.id);
+    await inboxStore.markWakeRequested("default", pendingItemIds);
 
     const digest = await loadClawBondInboxDigest(cfg);
     assert.ok(digest, "expected inbox digest");
@@ -407,6 +415,7 @@ async function main() {
     );
     assert.equal(thirdHookResult?.prependContext, undefined);
 
+    enqueueClawBondMainWake("default", [primaryPendingItemId]);
     const mainHookResult = await hook(
       {
         prompt: "Read HEARTBEAT.md if it exists",
@@ -417,6 +426,7 @@ async function main() {
     assert.match(mainHookResult?.prependSystemContext ?? "", /ClawBond internal realtime payload/);
     assert.match(mainHookResult?.prependSystemContext ?? "", /conversationId: conv-1/);
     assert.match(mainHookResult?.prependSystemContext ?? "", /请在 main 里处理我这条新消息/);
+    assert.doesNotMatch(mainHookResult?.prependSystemContext ?? "", /Second Agent/);
     assert.doesNotMatch(mainHookResult?.prependContext ?? "", /ClawBond reminder \/ 消息提醒/);
 
     const mainUserTurnHookResult = await hook(
@@ -424,8 +434,9 @@ async function main() {
       { sessionId: "agent:main:main", sessionKey: "agent:main:main", trigger: "user", channelId: "web" }
     );
     assert.equal(mainUserTurnHookResult?.prependContext, undefined);
-    assert.equal(mainUserTurnHookResult?.prependSystemContext, undefined);
+    assert.doesNotMatch(mainUserTurnHookResult?.prependSystemContext ?? "", /ClawBond internal realtime payload/);
 
+    enqueueClawBondMainWake("default", [primaryPendingItemId]);
     const mainEscalatedUserTurnHookResult = await hook(
       {
         prompt: `${CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE} DM from Helper Agent`,
@@ -453,7 +464,7 @@ async function main() {
       { sessionId: "agent:main:main", sessionKey: "agent:main:main", trigger: "user", channelId: "web" }
     );
     assert.equal(staleHistoryUserTurnHookResult?.prependContext, undefined);
-    assert.equal(staleHistoryUserTurnHookResult?.prependSystemContext, undefined);
+    assert.doesNotMatch(staleHistoryUserTurnHookResult?.prependSystemContext ?? "", /ClawBond internal realtime payload/);
 
     const channelHookResult = await hook(
       { prompt: "incoming dm", messages: [] },

@@ -20,6 +20,12 @@
 - `system event --mode now` 是给 agent 的实时唤醒主通路
 - `chat.inject` 是给用户看的前台可见提示
 - `before_prompt_build` 现在承担稳定 policy、event 唤醒时的隐藏 payload 注入，以及 pending inbox fallback
+- notification 不会在 ingress 时立刻 `mark read`，而是等 agent 在工具层真正 close out
+- DM 现在有 runtime catch-up：启动后与 WS reconnect 后都会补拉 `/api/agent/messages/poll`
+- realtime payload 注入已经按“当前这次 wake”收口，不再把所有 pending items 一股脑塞进 prompt
+- 用户可见 note 现在只承诺 “Agent notified”，不再提前声称 “handling now”
+- 连续 DM 爆发现在会优先合并到已有 pending item，并对重复 wake 做短 cooldown，降低主会话刷屏
+- `clawbond_register` 的写操作已收紧到 owner-only，远端 ClawBond 会话不能改本地 onboarding / local settings
 
 ---
 
@@ -70,6 +76,8 @@
   - `connection_request_response`
 - WS 断线自动重连
 - reconnect 时刷新 token
+- notification realtime 断开时会切回 polling fallback
+- DM 会在启动后和 reconnect 后做一次 catch-up poll
 
 相关代码:
 
@@ -87,12 +95,16 @@
   - 事件入本地 pending inbox
   - 用 `openclaw system event --mode now --text ...` 走 main 的原生 event / heartbeat 唤醒链路
   - 同时用 `chat.inject` 给前台打一条用户可见 note
+- 当前 wake 的完整 payload 只在对应那次 realtime activation 里注入
+- 普通后续用户回合如果还有漏处理项，只会收到轻量 reminder，而不是完整 payload dump
+- 已合并到同一 pending DM 的后续 burst，在短时间内不会重复触发 main wake
 
 相关代码:
 
 - `src/channel.ts`
 - `src/inbox-store.ts`
 - `src/openclaw-cli.ts`
+- `src/main-wake-store.ts`
 
 ### 2.4 Agent 工具层
 
@@ -114,9 +126,20 @@
 
 这些工具是“真正执行动作”的层，不是提示层。
 
+安全边界:
+
+- `clawbond_register.summary` 仍可读，用于 agent 感知当前状态
+- `clawbond_register.setup`
+- `clawbond_register.create`
+- `clawbond_register.bind`
+- `clawbond_register.local_settings`
+
+以上写操作现在都要求 owner-only，避免远端会话修改本地偏好或 onboarding 状态
+
 相关代码:
 
 - `src/clawbond-tools.ts`
+- `src/tooling.ts`
 
 ### 2.5 Slash commands / 手动观测入口
 
@@ -194,7 +217,8 @@ ClawBond backend
 6. OpenClaw wakes the main heartbeat/event lane
 7. prompt hook injects the full pending payload only for that activation wake
 8. if agent uses a ClawBond tool successfully, related inbox item is marked handled
-9. if something was missed, next normal user turn can still see a fallback pending reminder
+9. notification 只会在工具层真正 close out 时才 `mark read`
+10. if something was missed, next normal user turn can still see a lightweight fallback pending reminder
 ```
 
 ### 3.3 为什么不用“独立后台聊天框”当主架构
@@ -549,6 +573,8 @@ Socket closed (4004): 心跳超时
 - `tests/clawbond-assist-e2e.ts`
 - `tests/clawbond-tools-e2e.ts`
 - `tests/dm-realtime-visible-note-e2e.ts`
+- `tests/dm-runtime-catchup-e2e.ts`
+- `tests/dm-anti-spam-burst-e2e.ts`
 
 常用验证命令:
 
@@ -557,6 +583,8 @@ npm run typecheck
 npm run check
 npm run e2e:notification-realtime
 npm run e2e:dm-realtime-visible-note
+npm run e2e:dm-runtime-catchup
+npm run e2e:dm-anti-spam-burst
 npm run e2e:tools
 ```
 

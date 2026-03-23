@@ -8,12 +8,15 @@ import type {
 } from "openclaw/plugin-sdk";
 
 import {
+  buildPendingMainInboxReminder,
   buildPendingMainInboxAgentContext,
   buildClawBondPolicyContext,
   getClawBondAccountStatusSnapshot,
   loadClawBondPendingMainInboxSnapshot
 } from "./clawbond-assist.ts";
 import { ClawBondActivityStore } from "./activity-store.ts";
+import { ClawBondInboxStore } from "./inbox-store.ts";
+import { consumeClawBondMainWake } from "./main-wake-store.ts";
 import { buildClawBondWelcomeMessage } from "./clawbond-onboarding.ts";
 import {
   CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE,
@@ -45,11 +48,18 @@ export function createClawBondBeforePromptBuildHandler(api: Pick<OpenClawPluginA
     const prependSystemBlocks: string[] = [];
 
     if (shouldInjectPendingMainInboxAgentContext(event, ctx)) {
-      const pendingMainInbox = loadClawBondPendingMainInboxSnapshot(api.config, snapshot.accountId, 20);
+      const pendingMainInbox = loadScopedPendingMainInboxSnapshot(api.config, snapshot.accountId);
       const pendingInjection = buildPendingMainInboxAgentContext(pendingMainInbox);
       if (pendingInjection) {
         prependSystemBlocks.push(pendingInjection);
         await recordPromptInjectionActivity(api, snapshot.accountId, snapshot.agentId, ctx, pendingMainInbox);
+      }
+    } else if (shouldInjectPendingMainInboxReminder(ctx)) {
+      const pendingReminder = buildPendingMainInboxReminder(
+        loadClawBondPendingMainInboxSnapshot(api.config, snapshot.accountId, 5)
+      );
+      if (pendingReminder) {
+        prependSystemBlocks.push(pendingReminder);
       }
     }
 
@@ -166,15 +176,19 @@ function shouldInjectPendingMainInboxAgentContext(
     return false;
   }
 
-  if (isClawBondWakeEvent(event)) {
-    return true;
+  return isClawBondWakeEvent(event);
+}
+
+function shouldInjectPendingMainInboxReminder(ctx: PluginHookAgentContext): boolean {
+  if (ctx.channelId === "clawbond") {
+    return false;
   }
 
-  if (ctx.trigger === "system") {
-    return true;
+  if (!isMainSession(ctx)) {
+    return false;
   }
 
-  return false;
+  return ctx.trigger !== "system";
 }
 
 function isMainSession(ctx: PluginHookAgentContext): boolean {
@@ -231,6 +245,32 @@ function joinPrependBlocks(blocks: string[]): string | undefined {
   }
 
   return normalized.join("\n\n");
+}
+
+function loadScopedPendingMainInboxSnapshot(
+  cfg: Pick<OpenClawPluginApi, "config">["config"],
+  accountId: string
+) {
+  const scopedItemIds = consumeClawBondMainWake(accountId);
+  if (scopedItemIds.length === 0) {
+    return null;
+  }
+
+  const snapshot = getClawBondAccountStatusSnapshot(cfg, accountId);
+  if (!snapshot) {
+    return null;
+  }
+
+  const items = new ClawBondInboxStore(snapshot.stateRoot).listPendingByIdsSync(
+    snapshot.accountId,
+    scopedItemIds
+  );
+
+  return {
+    accountId: snapshot.accountId,
+    agentId: snapshot.agentId,
+    items
+  };
 }
 
 function normalizeSessionRef(value: string | undefined): string | null {

@@ -18,7 +18,7 @@ const MAX_MERGED_MESSAGE_SEGMENTS = 4;
 
 export interface EnqueueInboxItemInput {
   fingerprint: string;
-  traceId: string;
+  traceId?: string;
   sourceKind: ClawBondPendingInboxItem["sourceKind"];
   peerId: string;
   peerLabel: string;
@@ -96,7 +96,7 @@ export class ClawBondInboxStore {
         id: randomUUID(),
         accountId,
         fingerprint: input.fingerprint.trim(),
-        traceId: input.traceId.trim() || input.fingerprint.trim(),
+        traceId: (input.traceId?.trim() || input.fingerprint.trim()),
         sourceKind: input.sourceKind,
         peerId: input.peerId.trim() || "unknown",
         peerLabel: input.peerLabel.trim() || input.peerId.trim() || "unknown",
@@ -571,6 +571,7 @@ function normalizeHandledBy(value: unknown): ClawBondInboxHandledBy | null {
 
 function normalizeDeliveryPath(value: unknown): ClawBondDeliveryPath | undefined {
   return value === "platform_realtime" ||
+    value === "message_polling" ||
     value === "notification_realtime" ||
     value === "notification_polling"
     ? value

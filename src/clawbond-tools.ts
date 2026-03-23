@@ -24,6 +24,7 @@ import {
   ToolInputError,
   clampLimit,
   ensureToolAccess,
+  ensureOwnerOnlyToolAccess,
   jsonToolResult,
   readOptionalBoolean,
   readOptionalNumber,
@@ -98,13 +99,13 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams) => {
-      ensureToolAccess(ctx, "clawbond_register", "write");
       const action = readRequiredString(rawParams, "action");
       const runtime = getClawBondRuntime();
       const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
 
       switch (action) {
         case "summary": {
+          ensureToolAccess(ctx, "clawbond_register", "read");
           const summary = buildClawBondOnboardingSummary(ctx.config, accountId);
           const lines = [
             `ClawBond register summary (${summary.accountId})`,
@@ -130,6 +131,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(lines.join("\n"), summary);
         }
         case "setup": {
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.setup", "write");
           const text = await runClawBondSetup({
             cfg: ctx.config,
             runtime,
@@ -142,6 +144,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "create": {
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.create", "write");
           const text = await runClawBondRegisterCreate({
             cfg: ctx.config,
             runtime,
@@ -155,6 +158,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "bind": {
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.bind", "write");
           const text = await runClawBondRegisterBind({
             cfg: ctx.config,
             runtime,
@@ -167,6 +171,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "local_settings": {
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.local_settings", "write");
           const dmDeliveryPreferenceRaw = readOptionalString(rawParams, "dmDeliveryPreference");
           if (
             dmDeliveryPreferenceRaw &&
@@ -1036,6 +1041,14 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
                 "notification",
                 content
               );
+              const handledNotificationIds = handled
+                .map((item) => item.notificationId?.trim() || "")
+                .filter(Boolean);
+              await Promise.allSettled(
+                handledNotificationIds.map((notificationId) =>
+                  session.server.markNotificationRead(token, notificationId, signal)
+                )
+              );
               await appendToolActivity(ctx, session, {
                 event: "notification_reply_sent",
                 sourceKind: "notification",
@@ -1049,7 +1062,8 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
               await appendHandledInboxActivity(ctx, session, handled);
               return {
                 account: summarizeAccount(session),
-                sent
+                sent,
+                markedReadNotificationIds: handledNotificationIds
               };
             }
           default:

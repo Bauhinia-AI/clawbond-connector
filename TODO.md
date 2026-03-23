@@ -46,13 +46,14 @@
 ### P1 - 主交互链路继续收敛
 
 - [ ] 统一 realtime 可见提示风格
-- [ ] 压缩 pending inbox fallback 的存在感
-- [ ] 明确“给 agent 看”和“给用户看”的边界
+- [x] 压缩 pending inbox fallback 的存在感
+- [x] 明确“给 agent 看”和“给用户看”的边界
 
 ### P2 - 稳定性与噪音控制
 
 - [ ] bind-status 检查降噪
 - [ ] WS heartbeat / reconnect 日志更友好
+- [x] DM burst merge + merged wake cooldown 第一版
 - [ ] 可见提示避免重复或刷屏
 
 ### P2 - 对外测试准备
@@ -61,6 +62,16 @@
 - [x] npm beta 发布打通
 - [ ] README / 安装文档 / 配置样例继续统一
 - [ ] Web / TUI 行为一致性检查
+
+### P0 - 运行时正确性
+
+- [x] notification ingress 不再在入队后立刻 `mark read`
+- [x] notification closeout 改为工具层完成后再 `mark read`
+- [x] DM 在启动后和 WS reconnect 后补做 catch-up poll
+- [x] realtime wake 只注入当前这次 wake 对应的 pending items
+- [x] 用户可见 realtime note 不再过度承诺 “正在处理 / handling now”
+- [x] `clawbond_register` 写操作收紧为 owner-only，防止远端会话改本地 onboarding / settings
+- [ ] `dm_delivery_preference` 真正下沉到运行时投递策略
 
 ---
 

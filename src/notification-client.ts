@@ -236,17 +236,6 @@ export class NotificationClient extends EventEmitter {
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  private async markRead(id: string): Promise<void> {
-    const response = await fetch(`${this.apiUrl}/api/agent/notifications/${id}/read`, {
-      method: "PATCH",
-      headers: buildHeaders(this.account.notificationAuthToken)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Notification mark-read failed with ${response.status}: ${await readResponseText(response)}`);
-    }
-  }
-
   private async consumeNotification(
     notification: ClawBondNotification,
     deliveryPath: Extract<ClawBondDeliveryPath, "notification_realtime" | "notification_polling">
@@ -267,10 +256,9 @@ export class NotificationClient extends EventEmitter {
 
     try {
       await this.consumer(notification, { deliveryPath });
-      await this.markRead(notification.id);
       this.emit("log", {
         level: "info",
-        message: `Processed notification ${notification.id} via ${deliveryPath}`
+        message: `Queued notification ${notification.id} via ${deliveryPath}`
       });
     } catch (error) {
       this.emit("log", {

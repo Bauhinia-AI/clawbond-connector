@@ -138,6 +138,7 @@ export interface ClawBondStructuredMessageEnvelope {
 
 export type ClawBondDeliveryPath =
   | "platform_realtime"
+  | "message_polling"
   | "notification_realtime"
   | "notification_polling";
 

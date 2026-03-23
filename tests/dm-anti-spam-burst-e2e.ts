@@ -7,14 +7,14 @@ import path from "node:path";
 
 import { WebSocketServer } from "ws";
 
+import { loadClawBondPendingMainInboxSnapshot } from "../src/clawbond-assist.ts";
 import { clawbondPlugin } from "../src/channel.ts";
 import { resolveAccount } from "../src/config.ts";
-import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
-  const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-dm-visible-note-e2e-"));
-  const wakeDir = await mkdtemp(path.join(tmpdir(), "clawbond-dm-visible-openclaw-"));
+  const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-dm-antispam-e2e-"));
+  const wakeDir = await mkdtemp(path.join(tmpdir(), "clawbond-dm-antispam-openclaw-"));
   const wakeLogPath = path.join(wakeDir, "wake.log");
   const fakeOpenClawPath = path.join(wakeDir, "openclaw");
   const originalOpenClawBin = process.env.CLAWBOND_OPENCLAW_BIN;
@@ -45,10 +45,7 @@ async function main() {
       return;
     }
 
-    if (
-      req.method === "GET" &&
-      url.pathname === "/api/conversations/conv-2001/messages"
-    ) {
+    if (req.method === "GET" && url.pathname === "/api/conversations/conv-4001/messages") {
       assert.equal(req.headers.authorization, "Bearer rt_test");
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
@@ -56,16 +53,24 @@ async function main() {
           code: 200,
           data: [
             {
-              id: "msg-2001",
+              id: "msg-4001",
               sender_id: "267736442501861376",
               sender_nickname: "galaxy0-fresh-bind-test",
-              content: "hello from clawbond",
+              content: "first burst DM",
               msg_type: "text",
-              created_at: "2026-03-21T07:00:00.000Z"
+              created_at: "2026-03-23T08:00:00.000Z"
+            },
+            {
+              id: "msg-4002",
+              sender_id: "267736442501861376",
+              sender_nickname: "galaxy0-fresh-bind-test",
+              content: "second burst DM",
+              msg_type: "text",
+              created_at: "2026-03-23T08:00:01.000Z"
             }
           ],
           message: "success",
-          pagination: { next_cursor: "msg-2001", has_more: false }
+          pagination: { next_cursor: "msg-4002", has_more: false }
         })
       );
       return;
@@ -101,12 +106,26 @@ async function main() {
         JSON.stringify({
           event: "message",
           from_agent_id: "267736442501861376",
-          conversation_id: "conv-2001",
-          content: "hello from clawbond",
+          conversation_id: "conv-4001",
+          content: "first burst DM",
           sender_type: "agent",
-          timestamp: "2026-03-21T07:00:00.000Z"
+          timestamp: "2026-03-23T08:00:00.000Z"
         })
       );
+
+      setTimeout(() => {
+        ws.send(
+          JSON.stringify({
+            event: "message",
+            from_agent_id: "267736442501861376",
+            conversation_id: "conv-4001",
+            content: "second burst DM",
+            sender_type: "agent",
+            timestamp: "2026-03-23T08:00:01.000Z"
+          })
+        );
+      }, 800);
+
       resolve();
     });
   });
@@ -121,7 +140,7 @@ async function main() {
         bootstrapEnabled: false,
         runtimeToken: "rt_test",
         agentId: "agent-local",
-        agentName: "Realtime DM Test Agent",
+        agentName: "Anti Spam Test Agent",
         notificationsEnabled: true,
         notificationApiUrl: `http://127.0.0.1:${address.port}`,
         notificationAuthToken: "agent_jwt_test",
@@ -184,24 +203,39 @@ async function main() {
   try {
     await wsConnected;
     await waitFor(async () => {
+      const pending = loadClawBondPendingMainInboxSnapshot(cfg);
+      if (!pending || pending.items.length !== 1) {
+        return false;
+      }
+
+      const merged = pending.items[0]?.content ?? "";
+      if (!merged.includes("first burst DM") || !merged.includes("second burst DM")) {
+        return false;
+      }
+
       try {
         const wakeLog = await readFile(wakeLogPath, "utf-8");
-        return (
-          wakeLog.includes("gateway call chat.inject --params") &&
-          wakeLog.includes("gateway call chat.send --params") &&
-          !wakeLog.includes("system event --mode now --text") &&
-          wakeLog.includes(CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE) &&
-          wakeLog.includes("This is not a heartbeat poll. Do not reply with HEARTBEAT_OK.") &&
-          wakeLog.includes("New DM from galaxy0-fresh-bind-test. Agent notified.") &&
-          !wakeLog.includes("Handling new DM from galaxy0-fresh-bind-test now.") &&
-          !wakeLog.includes("New DM from galaxy0-fresh-bind-test. Agent notified and handling now.")
-        );
+        const chatSendCount = countOccurrences(wakeLog, "gateway call chat.send --params");
+        return chatSendCount === 1;
       } catch {
         return false;
       }
-    }, 5000);
+    }, 7000);
 
-    console.log("dm-realtime-visible-note E2E passed");
+    const wakeLog = await readFile(wakeLogPath, "utf-8");
+    const chatSendCount = countOccurrences(wakeLog, "gateway call chat.send --params");
+    const chatInjectCount = countOccurrences(wakeLog, "gateway call chat.inject --params");
+
+    assert.equal(chatSendCount, 1);
+    assert.equal(chatInjectCount, 1);
+
+    const pending = loadClawBondPendingMainInboxSnapshot(cfg);
+    assert.ok(pending);
+    assert.equal(pending?.items.length, 1);
+    assert.match(pending?.items[0]?.content ?? "", /first burst DM/);
+    assert.match(pending?.items[0]?.content ?? "", /second burst DM/);
+
+    console.log("dm-anti-spam-burst E2E passed");
   } finally {
     abortController.abort();
     await runPromise;
@@ -227,6 +261,23 @@ async function main() {
   }
 }
 
+function countOccurrences(value: string, needle: string): number {
+  if (!value || !needle) {
+    return 0;
+  }
+
+  let count = 0;
+  let start = 0;
+  while (true) {
+    const index = value.indexOf(needle, start);
+    if (index < 0) {
+      return count;
+    }
+    count += 1;
+    start = index + needle.length;
+  }
+}
+
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
@@ -238,7 +289,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 
-  throw new Error("Timed out waiting for visible DM note");
+  throw new Error("Timed out waiting for DM anti-spam burst result");
 }
 
 await main();

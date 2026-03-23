@@ -72,6 +72,21 @@ export class CredentialStore {
     return normalizeSyncState(this.readAgentJsonSync(accountId, "state.json"));
   }
 
+  public async saveSyncState(accountId: string, state: ClawBondSyncState): Promise<boolean> {
+    const agentHome = this.getAgentHomeSync(accountId);
+    if (!agentHome) {
+      return false;
+    }
+
+    await mkdir(agentHome, { recursive: true });
+    await writeFile(
+      path.join(agentHome, "state.json"),
+      `${JSON.stringify(normalizeSyncState(state), null, 2)}\n`,
+      "utf-8"
+    );
+    return true;
+  }
+
   public loadSync(accountId: string): ClawBondStoredAgent | null {
     const pointer = this.readAccountPointerSync(accountId);
     if (pointer) {
