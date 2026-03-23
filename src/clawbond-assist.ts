@@ -7,6 +7,8 @@ import { CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import type {
   ClawBondActivityEntry,
+  ClawBondActivityEvent,
+  ClawBondDeliveryPath,
   ClawBondDmDeliveryPreference,
   ClawBondNotification,
   ClawBondPendingInboxItem,
@@ -90,7 +92,22 @@ export interface ClawBondActivitySnapshot {
   recentEntries: ClawBondActivityEntry[];
   activeSessions: ClawBondActivitySessionSnapshot[];
   pendingMainInboxCount: number;
+  pendingTraces: ClawBondPendingTraceSnapshot[];
   latestEventId: string | null;
+}
+
+export interface ClawBondPendingTraceSnapshot {
+  itemId: string;
+  traceId: string;
+  sourceKind: ClawBondPendingInboxItem["sourceKind"];
+  peerId: string;
+  peerLabel: string;
+  deliveryPath: ClawBondDeliveryPath | "unknown";
+  receivedAt: string;
+  wakeCount: number;
+  lastEvent: ClawBondActivityEvent | null;
+  lastEventAt: string | null;
+  lastSummary: string;
 }
 
 export interface ClawBondPendingMainInboxSnapshot {
@@ -222,8 +239,9 @@ export function loadClawBondActivitySnapshot(
 
   const store = new ClawBondActivityStore(snapshot.stateRoot);
   const inboxStore = new ClawBondInboxStore(snapshot.stateRoot);
-  const entries = store.listSync(snapshot.accountId, 100);
+  const entries = store.listSync(snapshot.accountId, 200);
   const recentEntries = entries.slice(-SUMMARY_ACTIVITY_LIMIT);
+  const pendingItems = inboxStore.listPendingSync(snapshot.accountId, 20);
   const sessions = new Map<string, ClawBondActivitySessionSnapshot>();
 
   for (const entry of entries) {
@@ -259,7 +277,8 @@ export function loadClawBondActivitySnapshot(
     agentId: snapshot.agentId,
     recentEntries,
     activeSessions: Array.from(sessions.values()).filter((entry) => entry.status === "running"),
-    pendingMainInboxCount: inboxStore.listPendingSync(snapshot.accountId, 20).length,
+    pendingMainInboxCount: pendingItems.length,
+    pendingTraces: buildPendingTraceSnapshots(pendingItems, entries),
     latestEventId: entries.at(-1)?.id ?? null
   };
 }
@@ -532,8 +551,15 @@ export function formatActivitySnapshotForCommand(snapshot: ClawBondActivitySnaps
     `ClawBond activity (${snapshot.accountId})`,
     `- active legacy background sessions: ${snapshot.activeSessions.length}`,
     `- pending main-session inbox items: ${snapshot.pendingMainInboxCount}`,
+    `- pending traces: ${snapshot.pendingTraces.length}`,
     `- recent events: ${snapshot.recentEntries.length}`
   ];
+
+  for (const trace of snapshot.pendingTraces.slice(-5)) {
+    lines.push(
+      `- pending ${formatPendingSourceKindLabel(trace.sourceKind)} from ${trace.peerLabel}: stage=${trace.lastEvent ?? "waiting"} via=${trace.deliveryPath} wakeCount=${trace.wakeCount} trace=${trace.traceId}`
+    );
+  }
 
   for (const session of snapshot.activeSessions.slice(0, 3)) {
     lines.push(`- active ${session.sourceKind} thread ${session.peerLabel}: ${session.lastSummary}`);
@@ -544,6 +570,32 @@ export function formatActivitySnapshotForCommand(snapshot: ClawBondActivitySnaps
   }
 
   return lines.join("\n");
+}
+
+function buildPendingTraceSnapshots(
+  pendingItems: ClawBondPendingInboxItem[],
+  entries: ClawBondActivityEntry[]
+): ClawBondPendingTraceSnapshot[] {
+  return pendingItems.map((item) => {
+    const latest =
+      [...entries]
+        .reverse()
+        .find((entry) => entry.traceId === item.traceId || entry.itemId === item.id) ?? null;
+
+    return {
+      itemId: item.id,
+      traceId: item.traceId,
+      sourceKind: item.sourceKind,
+      peerId: item.peerId,
+      peerLabel: item.peerLabel,
+      deliveryPath: item.deliveryPath ?? "unknown",
+      receivedAt: item.receivedAt,
+      wakeCount: item.wakeCount,
+      lastEvent: latest?.event ?? null,
+      lastEventAt: latest?.recordedAt ?? null,
+      lastSummary: latest?.summary ?? "Pending item is queued but has no recorded downstream stage yet."
+    };
+  });
 }
 
 function resolveAssistAccountId(cfg: OpenClawConfig, accountId?: string | null): string | null {

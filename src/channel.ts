@@ -565,11 +565,11 @@ async function runConnectedSession(params: {
       });
     });
 
-    notificationClient.setConsumer(async (notification) => {
+    notificationClient.setConsumer(async (notification, meta) => {
       await dispatchPlatformInvoke(
         params.ctx,
         params.account,
-        notificationClient!.buildInvokeMessage(notification),
+        notificationClient!.buildInvokeMessageWithPath(notification, meta.deliveryPath),
         params.resolvePeerLabel
       );
     });
@@ -815,49 +815,61 @@ async function dispatchPlatformInvoke(
     sourceAgentId: message.sourceAgentId,
     conversationId: message.conversationId,
     sessionKey: message.sessionKey,
-    messageKind: message.structuredEnvelope?.kind ?? "message"
+    messageKind: message.structuredEnvelope?.kind ?? "message",
+    deliveryPath: resolveDeliveryPath(message)
   });
 
   const peerLabel = await resolveDisplayPeerLabel(message, resolvePeerLabel);
   const peer = describeActivityPeer(message, peerLabel);
   const sessionKey = MAIN_SESSION_KEY;
-
-  await recordClawBondActivity(ctx, account, {
-    agentId: account.agentId,
-    sessionKey,
-    requestId: message.requestId,
-    conversationId: message.conversationId,
-    peerId: peer.peerId,
-    peerLabel: peer.peerLabel,
-    sourceKind: message.sourceKind || "message",
-    event: "inbound_received",
-    summary: `Received ${describeSourceKind(message)} from ${peer.peerLabel}`,
-    preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
-  });
   const inboxStore = new ClawBondInboxStore(account.stateRoot);
   const sourceKind = message.sourceKind || "message";
+  const deliveryPath = resolveDeliveryPath(message);
+  const traceId = buildPendingTraceId(message);
   const queued = await inboxStore.enqueue(account.accountId, {
-    fingerprint: buildPendingInboxFingerprint(message),
+    fingerprint: buildPendingInboxFingerprint(message, traceId),
+    traceId,
     sourceKind,
     peerId: peer.peerId,
     peerLabel: peer.peerLabel,
     summary: `Pending ${describeSourceKind(message)} from ${peer.peerLabel}`,
     content: message.rawPrompt ?? message.prompt,
     receivedAt: message.timestamp,
+    deliveryPath,
     requestId: message.requestId,
     conversationId: message.conversationId,
     notificationId: message.notificationId,
     requestKey: resolveRequestKey(message)
+  });
+  const effectiveTraceId = queued.item.traceId;
+
+  await recordClawBondActivity(ctx, account, {
+    agentId: account.agentId,
+    sessionKey,
+    itemId: queued.item.id,
+    traceId: effectiveTraceId,
+    requestId: message.requestId,
+    conversationId: message.conversationId,
+    peerId: peer.peerId,
+    peerLabel: peer.peerLabel,
+    deliveryPath,
+    sourceKind,
+    event: "inbound_received",
+    summary: `Received ${describeSourceKind(message)} from ${peer.peerLabel}`,
+    preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
   });
 
   if (queued.created || queued.merged) {
     await recordClawBondActivity(ctx, account, {
       agentId: account.agentId,
       sessionKey,
+      itemId: queued.item.id,
+      traceId: effectiveTraceId,
       requestId: message.requestId,
       conversationId: message.conversationId,
       peerId: peer.peerId,
       peerLabel: peer.peerLabel,
+      deliveryPath,
       sourceKind,
       event: "main_inbox_queued",
       summary: queued.merged
@@ -890,7 +902,12 @@ function markOutboundSuccess(ctx: StartAccountContext, account: ClawBondAccount)
   });
 }
 
-function buildPendingInboxFingerprint(message: ClawBondInvokeMessage): string {
+function buildPendingTraceId(message: ClawBondInvokeMessage): string {
+  const explicit = message.traceId?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
   if (message.notificationId?.trim()) {
     return `notification:${message.notificationId.trim()}`;
   }
@@ -911,6 +928,14 @@ function buildPendingInboxFingerprint(message: ClawBondInvokeMessage): string {
   hash.update("\n");
   hash.update(message.rawPrompt ?? message.prompt);
   return `message:${hash.digest("hex")}`;
+}
+
+function buildPendingInboxFingerprint(message: ClawBondInvokeMessage, traceId: string): string {
+  if (traceId.trim()) {
+    return traceId.trim();
+  }
+
+  return buildPendingTraceId(message);
 }
 
 function resolveRequestKey(message: ClawBondInvokeMessage): string {
@@ -1004,13 +1029,7 @@ async function triggerMainSessionWake(
     const chatSendText = buildMainRealtimeChatSendText(dmItems);
     queueMainSessionChatSend(chatSendText, {
       onError: (error) => {
-        void recordClawBondActivity(ctx, account, {
-          agentId: account.agentId,
-          sessionKey: MAIN_SESSION_KEY,
-          peerId: "main",
-          peerLabel: "main",
-          sourceKind: "system",
-          event: "main_run_failed",
+        void recordMainWakeActivity(ctx, account, dmItems, "main_run_failed", {
           summary: "Failed to send direct main-session ClawBond DM handoff",
           error: stringifyError(error)
         });
@@ -1020,14 +1039,8 @@ async function triggerMainSessionWake(
       }
     });
 
-    await recordClawBondActivity(ctx, account, {
-      agentId: account.agentId,
-      sessionKey: MAIN_SESSION_KEY,
-      peerId: "main",
-      peerLabel: "main",
-      sourceKind: "system",
-      event: "main_run_requested",
-      summary: `Sent direct main-session ClawBond DM handoff for ${dmItems.length} pending item(s)`,
+    await recordMainWakeActivity(ctx, account, dmItems, "main_run_requested", {
+      summary: "Sent direct main-session ClawBond DM handoff",
       preview: truncateActivityPreview(chatSendText)
     });
   }
@@ -1037,13 +1050,7 @@ async function triggerMainSessionWake(
 
     queueMainSessionWakeEvent(wakeEventText, {
       onError: (error) => {
-        void recordClawBondActivity(ctx, account, {
-          agentId: account.agentId,
-          sessionKey: MAIN_SESSION_KEY,
-          peerId: "main",
-          peerLabel: "main",
-          sourceKind: "system",
-          event: "main_run_failed",
+        void recordMainWakeActivity(ctx, account, nonDmItems, "main_run_failed", {
           summary: "Failed to request immediate main-session ClawBond wake",
           error: stringifyError(error)
         });
@@ -1053,14 +1060,8 @@ async function triggerMainSessionWake(
       }
     });
 
-    await recordClawBondActivity(ctx, account, {
-      agentId: account.agentId,
-      sessionKey: MAIN_SESSION_KEY,
-      peerId: "main",
-      peerLabel: "main",
-      sourceKind: "system",
-      event: "main_run_requested",
-      summary: `Requested immediate main-session ClawBond wake for ${nonDmItems.length} pending non-DM item(s)`,
+    await recordMainWakeActivity(ctx, account, nonDmItems, "main_run_requested", {
+      summary: "Requested immediate main-session ClawBond wake",
       preview: truncateActivityPreview(wakeEventText)
     });
   }
@@ -1337,6 +1338,50 @@ async function recordClawBondActivity(
       sessionKey: entry.sessionKey
     });
   }
+}
+
+async function recordMainWakeActivity(
+  ctx: StartAccountContext,
+  account: ClawBondAccount,
+  items: Array<{
+    id: string;
+    traceId: string;
+    sourceKind: ClawBondInvokeMessage["sourceKind"];
+    peerId: string;
+    peerLabel: string;
+    conversationId?: string;
+    deliveryPath?: ClawBondInvokeMessage["deliveryPath"];
+    summary: string;
+    content: string;
+  }>,
+  event: "main_run_requested" | "main_run_failed",
+  details: { summary: string; preview?: string; error?: string }
+) {
+  for (const item of items) {
+    await recordClawBondActivity(ctx, account, {
+      agentId: account.agentId,
+      sessionKey: MAIN_SESSION_KEY,
+      itemId: item.id,
+      traceId: item.traceId,
+      conversationId: item.conversationId,
+      peerId: item.peerId,
+      peerLabel: item.peerLabel,
+      deliveryPath: item.deliveryPath,
+      sourceKind: item.sourceKind || "message",
+      event,
+      summary: `${details.summary} for ${describePendingSourceKind(item.sourceKind)} from ${item.peerLabel}`,
+      preview: details.preview,
+      error: details.error
+    });
+  }
+}
+
+function resolveDeliveryPath(message: ClawBondInvokeMessage): ClawBondInvokeMessage["deliveryPath"] {
+  if (message.deliveryPath) {
+    return message.deliveryPath;
+  }
+
+  return "platform_realtime";
 }
 
 function describeActivityPeer(

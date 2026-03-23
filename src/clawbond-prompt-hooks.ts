@@ -13,6 +13,7 @@ import {
   getClawBondAccountStatusSnapshot,
   loadClawBondPendingMainInboxSnapshot
 } from "./clawbond-assist.ts";
+import { ClawBondActivityStore } from "./activity-store.ts";
 import { buildClawBondWelcomeMessage } from "./clawbond-onboarding.ts";
 import {
   CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE,
@@ -44,10 +45,11 @@ export function createClawBondBeforePromptBuildHandler(api: Pick<OpenClawPluginA
     const prependSystemBlocks: string[] = [];
 
     if (shouldInjectPendingMainInboxAgentContext(event, ctx)) {
-      const pendingMainInbox = loadClawBondPendingMainInboxSnapshot(api.config);
+      const pendingMainInbox = loadClawBondPendingMainInboxSnapshot(api.config, snapshot.accountId, 20);
       const pendingInjection = buildPendingMainInboxAgentContext(pendingMainInbox);
       if (pendingInjection) {
         prependSystemBlocks.push(pendingInjection);
+        await recordPromptInjectionActivity(api, snapshot.accountId, snapshot.agentId, ctx, pendingMainInbox);
       }
     }
 
@@ -56,6 +58,73 @@ export function createClawBondBeforePromptBuildHandler(api: Pick<OpenClawPluginA
       prependSystemContext: joinPrependBlocks(prependSystemBlocks)
     };
   };
+}
+
+async function recordPromptInjectionActivity(
+  api: Pick<OpenClawPluginApi, "config"> & {
+    logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
+  },
+  accountId: string,
+  agentId: string,
+  ctx: PluginHookAgentContext,
+  snapshot: ReturnType<typeof loadClawBondPendingMainInboxSnapshot>
+) {
+  if (!snapshot || snapshot.items.length === 0) {
+    return;
+  }
+
+  try {
+    const accountSnapshot = getClawBondAccountStatusSnapshot(api.config, accountId);
+    const stateRoot = accountSnapshot?.stateRoot;
+    if (!stateRoot) {
+      return;
+    }
+
+    const store = new ClawBondActivityStore(stateRoot);
+    for (const item of snapshot.items) {
+      await store.append(accountId, {
+        agentId,
+        sessionKey: ctx.sessionKey?.trim() || ctx.sessionId?.trim() || "agent:main:main",
+        itemId: item.id,
+        traceId: item.traceId,
+        conversationId: item.conversationId,
+        peerId: item.peerId,
+        peerLabel: item.peerLabel,
+        deliveryPath: item.deliveryPath,
+        sourceKind: item.sourceKind,
+        event: "main_prompt_injected",
+        summary: `Injected pending ${formatPromptItemKind(item.sourceKind)} from ${item.peerLabel} into the main-session prompt`,
+        preview: truncatePromptHookPreview(item.content)
+      });
+    }
+  } catch (error) {
+    api.logger?.warn?.("failed to persist ClawBond prompt injection activity", {
+      error: error instanceof Error ? error.message : String(error),
+      accountId
+    });
+  }
+}
+
+function formatPromptItemKind(sourceKind: NonNullable<ReturnType<typeof loadClawBondPendingMainInboxSnapshot>>["items"][number]["sourceKind"]): string {
+  switch (sourceKind) {
+    case "notification":
+      return "notification";
+    case "connection_request":
+      return "connection request";
+    case "connection_request_response":
+      return "connection request response";
+    default:
+      return "DM";
+  }
+}
+
+function truncatePromptHookPreview(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.length > 180 ? `${trimmed.slice(0, 177)}...` : trimmed;
 }
 
 export function createClawBondSessionStartHandler(api: Pick<OpenClawPluginApi, "config" | "runtime">) {

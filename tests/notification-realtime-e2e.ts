@@ -223,21 +223,31 @@ async function main() {
     assert.equal(pendingInbox?.items.length, 1);
     assert.equal(pendingInbox?.items[0]?.notificationId, "ws-1001");
     assert.equal(pendingInbox?.items[0]?.sourceKind, "notification");
+    assert.equal(pendingInbox?.items[0]?.traceId, "notification:ws-1001");
+    assert.equal(pendingInbox?.items[0]?.deliveryPath, "notification_realtime");
 
     const activitySnapshot = loadClawBondActivitySnapshot(cfg);
     assert.ok(activitySnapshot);
     assert.equal(
-      activitySnapshot?.recentEntries.some((entry) => entry.event === "inbound_received"),
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "inbound_received" && entry.traceId === "notification:ws-1001"
+      ),
       true
     );
     assert.equal(
-      activitySnapshot?.recentEntries.some((entry) => entry.event === "main_inbox_queued"),
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "main_inbox_queued" && entry.traceId === "notification:ws-1001"
+      ),
       true
     );
     assert.equal(
-      activitySnapshot?.recentEntries.some((entry) => entry.event === "main_run_requested"),
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "main_run_requested" && entry.traceId === "notification:ws-1001"
+      ),
       true
     );
+    assert.equal(activitySnapshot?.pendingTraces[0]?.traceId, "notification:ws-1001");
+    assert.equal(activitySnapshot?.pendingTraces[0]?.deliveryPath, "notification_realtime");
 
     const hook = createClawBondBeforePromptBuildHandler({
       config: cfg,
@@ -259,6 +269,14 @@ async function main() {
     assert.match(hookResult?.prependSystemContext ?? "", /notificationId: ws-1001/);
     assert.match(hookResult?.prependSystemContext ?? "", /请实时处理这条推送/);
     assert.doesNotMatch(hookResult?.prependContext ?? "", /ClawBond reminder \/ 消息提醒/);
+
+    const activityAfterHook = loadClawBondActivitySnapshot(cfg);
+    assert.equal(
+      activityAfterHook?.recentEntries.some(
+        (entry) => entry.event === "main_prompt_injected" && entry.traceId === "notification:ws-1001"
+      ),
+      true
+    );
 
     const followupHookResult = await hook(
       { prompt: "what just arrived", messages: [] },

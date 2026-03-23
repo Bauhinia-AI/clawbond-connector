@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { resolveStateRoot } from "./credential-store.ts";
 import type {
+  ClawBondDeliveryPath,
   ClawBondInboxHandledBy,
   ClawBondPendingInboxItem,
   ClawBondPendingInboxItemStatus
@@ -17,12 +18,14 @@ const MAX_MERGED_MESSAGE_SEGMENTS = 4;
 
 export interface EnqueueInboxItemInput {
   fingerprint: string;
+  traceId: string;
   sourceKind: ClawBondPendingInboxItem["sourceKind"];
   peerId: string;
   peerLabel: string;
   summary: string;
   content: string;
   receivedAt?: string;
+  deliveryPath?: ClawBondDeliveryPath;
   requestId?: string;
   conversationId?: string;
   notificationId?: string;
@@ -93,12 +96,14 @@ export class ClawBondInboxStore {
         id: randomUUID(),
         accountId,
         fingerprint: input.fingerprint.trim(),
+        traceId: input.traceId.trim() || input.fingerprint.trim(),
         sourceKind: input.sourceKind,
         peerId: input.peerId.trim() || "unknown",
         peerLabel: input.peerLabel.trim() || input.peerId.trim() || "unknown",
         summary: input.summary.trim() || "ClawBond inbox item",
         content: input.content.trim(),
         receivedAt: normalizeTimestamp(input.receivedAt),
+        deliveryPath: normalizeDeliveryPath(input.deliveryPath),
         status: "pending",
         requestId: normalizeOptionalString(input.requestId),
         conversationId: normalizeOptionalString(input.conversationId),
@@ -386,12 +391,13 @@ function normalizePendingInboxItems(value: unknown): ClawBondPendingInboxItem[] 
     const id = normalizeOptionalString(candidate.id);
     const accountId = normalizeOptionalString(candidate.accountId);
     const fingerprint = normalizeOptionalString(candidate.fingerprint);
+    const traceId = normalizeOptionalString(candidate.traceId) || fingerprint;
     const sourceKind = normalizeSourceKind(candidate.sourceKind);
     const peerId = normalizeOptionalString(candidate.peerId);
     const peerLabel = normalizeOptionalString(candidate.peerLabel) || peerId;
     const summary = normalizeOptionalString(candidate.summary);
     const content = normalizeOptionalString(candidate.content);
-    if (!id || !accountId || !fingerprint || !sourceKind || !peerId || !summary) {
+    if (!id || !accountId || !fingerprint || !traceId || !sourceKind || !peerId || !summary) {
       return [];
     }
 
@@ -400,12 +406,14 @@ function normalizePendingInboxItems(value: unknown): ClawBondPendingInboxItem[] 
         id,
         accountId,
         fingerprint,
+        traceId,
         sourceKind,
         peerId,
         peerLabel,
         summary,
         content,
         receivedAt: normalizeTimestamp(candidate.receivedAt),
+        deliveryPath: normalizeDeliveryPath(candidate.deliveryPath),
         status: normalizeStatus(candidate.status),
         requestId: normalizeOptionalString(candidate.requestId),
         conversationId: normalizeOptionalString(candidate.conversationId),
@@ -480,11 +488,13 @@ function mergePendingConversationItem(
   return {
     ...existing,
     fingerprint: input.fingerprint.trim() || existing.fingerprint,
+    traceId: existing.traceId,
     peerId: input.peerId.trim() || existing.peerId,
     peerLabel: input.peerLabel.trim() || existing.peerLabel,
     summary: input.summary.trim() || existing.summary,
     content: mergePendingMessageContent(existing, input.content, input.receivedAt),
     receivedAt: normalizeTimestamp(input.receivedAt),
+    deliveryPath: normalizeDeliveryPath(input.deliveryPath) || existing.deliveryPath,
     requestId: normalizeOptionalString(input.requestId) || existing.requestId,
     conversationId: normalizeOptionalString(input.conversationId) || existing.conversationId,
     notificationId: normalizeOptionalString(input.notificationId) || existing.notificationId,
@@ -557,6 +567,14 @@ function normalizeHandledBy(value: unknown): ClawBondInboxHandledBy | null {
     value === "manual"
     ? value
     : null;
+}
+
+function normalizeDeliveryPath(value: unknown): ClawBondDeliveryPath | undefined {
+  return value === "platform_realtime" ||
+    value === "notification_realtime" ||
+    value === "notification_polling"
+    ? value
+    : undefined;
 }
 
 function normalizeTimestamp(value: unknown): string {

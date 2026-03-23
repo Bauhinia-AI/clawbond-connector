@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { WebSocketServer } from "ws";
 
 import { clawbondPlugin } from "../src/channel.ts";
+import {
+  loadClawBondActivitySnapshot,
+  loadClawBondPendingMainInboxSnapshot
+} from "../src/clawbond-assist.ts";
 import { resolveAccount } from "../src/config.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
@@ -24,8 +28,6 @@ async function main() {
     }
   ];
   const readIds: string[] = [];
-  const outboundNotifications: string[] = [];
-  const inboundContexts: Array<Record<string, unknown>> = [];
 
   const wss = new WebSocketServer({ noServer: true });
   const server = createServer(async (req, res) => {
@@ -52,20 +54,6 @@ async function main() {
       notifications[0]!.is_read = true;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ code: 200, data: { id: "1001", is_read: true }, message: "success" }));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/agent/notifications/send") {
-      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(Buffer.from(chunk));
-      }
-      const body = JSON.parse(Buffer.concat(chunks).toString()) as { content: string };
-      outboundNotifications.push(body.content);
-
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ code: 201, data: { ok: true }, message: "success" }));
       return;
     }
 
@@ -111,52 +99,25 @@ async function main() {
         bootstrapEnabled: false,
         runtimeToken: "rt_test",
         agentId: "agent-local",
+        agentName: "Polling Test Agent",
+        bindingStatus: "bound",
         notificationsEnabled: true,
         notificationApiUrl: `http://127.0.0.1:${address.port}`,
         notificationAuthToken: "agent_jwt_test",
-        notificationPollIntervalMs: 100
+        notificationPollIntervalMs: 100,
+        visibleMainSessionNotes: false
       }
     }
   };
 
   const account = resolveAccount(cfg, "default");
-  const stubChannelRuntime = {
-    routing: {
-      resolveAgentRoute: ({ peer }: { peer: { id: string } }) => ({
-        agentId: "local-openclaw-agent",
-        sessionKey: `channel:clawbond:peer:${peer.id}`
-      })
-    },
-    session: {
-      resolveStorePath: () => "/tmp/clawbond-notification-polling-e2e",
-      readSessionUpdatedAt: () => undefined,
-      recordInboundSession: async ({ ctx }: { ctx: Record<string, unknown> }) => {
-        inboundContexts.push(ctx);
-      }
-    },
-    reply: {
-      finalizeInboundContext: <T extends Record<string, unknown>>(ctx: T) => ctx,
-      resolveEnvelopeFormatOptions: () => undefined,
-      formatAgentEnvelope: ({ body }: { body: string }) => body,
-      dispatchReplyWithBufferedBlockDispatcher: async ({
-        dispatcherOptions
-      }: {
-        dispatcherOptions: { deliver: (payload: { text: string }) => Promise<void> };
-      }) => {
-        await dispatcherOptions.deliver({
-          text: "ACK:notification"
-        });
-      }
-    }
-  };
 
   setClawBondRuntime({
     logger: {
       info: () => undefined,
       warn: () => undefined,
       error: () => undefined
-    },
-    channel: stubChannelRuntime
+    }
   });
 
   const abortController = new AbortController();
@@ -171,7 +132,7 @@ async function main() {
       error: () => undefined,
       debug: () => undefined
     },
-    channelRuntime: stubChannelRuntime,
+    channelRuntime: undefined,
     getStatus: () => ({ accountId: account.accountId }),
     setStatus: () => undefined
   });
@@ -181,7 +142,26 @@ async function main() {
   }
 
   const completion = waitFor(
-    () => readIds.includes("1001") && outboundNotifications.includes("ACK:notification"),
+    async () => {
+      if (!readIds.includes("1001")) {
+        return false;
+      }
+
+      const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
+      if (!pendingInbox || pendingInbox.items.length !== 1) {
+        return false;
+      }
+      const activitySnapshot = loadClawBondActivitySnapshot(cfg);
+      if (
+        !activitySnapshot?.recentEntries.some(
+          (entry) => entry.event === "main_run_requested" && entry.traceId === "notification:1001"
+        )
+      ) {
+        return false;
+      }
+
+      return true;
+    },
     5000
   );
 
@@ -190,14 +170,35 @@ async function main() {
     await completion;
 
     assert.equal(readIds.length, 1);
-    assert.deepEqual(outboundNotifications, ["ACK:notification"]);
-    assert.equal(inboundContexts.length, 1);
 
-    const context = inboundContexts[0] ?? {};
-    assert.equal(context.RawBody, "[学习任务]\n请学习这篇帖子并整理成报告。");
-    assert.match(String(context.BodyForAgent ?? ""), /ClawBond notification/);
-    assert.match(String(context.BodyForAgent ?? ""), /Notification ID: 1001/);
-    assert.match(String(context.BodyForAgent ?? ""), /Sender type: user/);
+    const pendingInbox = loadClawBondPendingMainInboxSnapshot(cfg);
+    assert.ok(pendingInbox);
+    assert.equal(pendingInbox?.items.length, 1);
+    assert.equal(pendingInbox?.items[0]?.notificationId, "1001");
+    assert.equal(pendingInbox?.items[0]?.traceId, "notification:1001");
+    assert.equal(pendingInbox?.items[0]?.deliveryPath, "notification_polling");
+
+    const activitySnapshot = loadClawBondActivitySnapshot(cfg);
+    assert.ok(activitySnapshot);
+    assert.equal(
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "inbound_received" && entry.traceId === "notification:1001"
+      ),
+      true
+    );
+    assert.equal(
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "main_inbox_queued" && entry.traceId === "notification:1001"
+      ),
+      true
+    );
+    assert.equal(
+      activitySnapshot?.recentEntries.some(
+        (entry) => entry.event === "main_run_requested" && entry.traceId === "notification:1001"
+      ),
+      true
+    );
+    assert.equal(activitySnapshot?.pendingTraces[0]?.deliveryPath, "notification_polling");
 
     console.log("notification-polling E2E passed");
   } finally {
@@ -217,26 +218,18 @@ async function main() {
   }
 }
 
-function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
 
-    const tick = () => {
-      if (predicate()) {
-        resolve();
-        return;
-      }
+  while (Date.now() < deadline) {
+    if (await predicate()) {
+      return;
+    }
 
-      if (Date.now() >= deadline) {
-        reject(new Error("Timed out waiting for notification polling result"));
-        return;
-      }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 
-      setTimeout(tick, 25);
-    };
-
-    tick();
-  });
+  throw new Error("Timed out waiting for notification polling result");
 }
 
 await main();

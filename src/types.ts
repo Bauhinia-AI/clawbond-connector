@@ -136,6 +136,11 @@ export interface ClawBondStructuredMessageEnvelope {
   payload?: unknown;
 }
 
+export type ClawBondDeliveryPath =
+  | "platform_realtime"
+  | "notification_realtime"
+  | "notification_polling";
+
 export interface ClawBondInvokeMessage {
   type: "invoke";
   requestId: string;
@@ -149,6 +154,8 @@ export interface ClawBondInvokeMessage {
   structuredEnvelope?: ClawBondStructuredMessageEnvelope;
   sourceKind?: "message" | "notification" | "connection_request" | "connection_request_response";
   notificationId?: string;
+  traceId?: string;
+  deliveryPath?: ClawBondDeliveryPath;
   context?: Array<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -243,12 +250,14 @@ export interface ClawBondPendingInboxItem {
   id: string;
   accountId: string;
   fingerprint: string;
+  traceId: string;
   sourceKind: NonNullable<ClawBondInvokeMessage["sourceKind"]>;
   peerId: string;
   peerLabel: string;
   summary: string;
   content: string;
   receivedAt: string;
+  deliveryPath?: ClawBondDeliveryPath;
   status: ClawBondPendingInboxItemStatus;
   requestId?: string;
   conversationId?: string;
@@ -265,6 +274,7 @@ export type ClawBondActivityEvent =
   | "inbound_received"
   | "main_inbox_queued"
   | "main_run_requested"
+  | "main_prompt_injected"
   | "main_run_escalated"
   | "main_run_failed"
   | "pending_handled"
@@ -280,10 +290,13 @@ export interface ClawBondActivityEntry {
   accountId: string;
   agentId: string;
   sessionKey: string;
+  itemId?: string;
+  traceId?: string;
   requestId?: string;
   conversationId?: string;
   peerId?: string;
   peerLabel?: string;
+  deliveryPath?: ClawBondDeliveryPath;
   sourceKind?: ClawBondInvokeMessage["sourceKind"] | "system";
   event: ClawBondActivityEvent;
   summary: string;

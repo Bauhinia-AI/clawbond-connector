@@ -2,11 +2,19 @@ import { EventEmitter } from "node:events";
 
 import type {
   ClawBondAccount,
+  ClawBondDeliveryPath,
   ClawBondInvokeMessage,
   ClawBondNotification
 } from "./types.ts";
 
-type NotificationConsumer = (notification: ClawBondNotification) => Promise<void>;
+interface NotificationConsumerMeta {
+  deliveryPath: Extract<ClawBondDeliveryPath, "notification_realtime" | "notification_polling">;
+}
+
+type NotificationConsumer = (
+  notification: ClawBondNotification,
+  meta: NotificationConsumerMeta
+) => Promise<void>;
 
 interface WrappedListResponse {
   data?: unknown;
@@ -91,7 +99,7 @@ export class NotificationClient extends EventEmitter {
       level: "info",
       message: `Received realtime notification ${notification.id}`
     });
-    await this.consumeNotification(notification);
+    await this.consumeNotification(notification, "notification_realtime");
   }
 
   public async syncOnce(): Promise<void> {
@@ -135,6 +143,13 @@ export class NotificationClient extends EventEmitter {
   }
 
   public buildInvokeMessage(notification: ClawBondNotification): ClawBondInvokeMessage {
+    return this.buildInvokeMessageWithPath(notification, "notification_realtime");
+  }
+
+  public buildInvokeMessageWithPath(
+    notification: ClawBondNotification,
+    deliveryPath: Extract<ClawBondDeliveryPath, "notification_realtime" | "notification_polling">
+  ): ClawBondInvokeMessage {
     const sourceAgentId = `notification:${notification.senderType}:${notification.senderId}`;
 
     return {
@@ -146,7 +161,9 @@ export class NotificationClient extends EventEmitter {
       prompt: formatNotificationForAgent(notification),
       rawPrompt: notification.content,
       sourceKind: "notification",
-      notificationId: notification.id
+      notificationId: notification.id,
+      traceId: `notification:${notification.id}`,
+      deliveryPath
     };
   }
 
@@ -161,7 +178,7 @@ export class NotificationClient extends EventEmitter {
       const notifications = await this.listUnreadNotifications();
 
       for (const notification of notifications) {
-        await this.consumeNotification(notification);
+        await this.consumeNotification(notification, "notification_polling");
       }
     } catch (error) {
       this.emit("log", {
@@ -230,7 +247,10 @@ export class NotificationClient extends EventEmitter {
     }
   }
 
-  private async consumeNotification(notification: ClawBondNotification): Promise<void> {
+  private async consumeNotification(
+    notification: ClawBondNotification,
+    deliveryPath: Extract<ClawBondDeliveryPath, "notification_realtime" | "notification_polling">
+  ): Promise<void> {
     if (this.stopped || !this.consumer) {
       return;
     }
@@ -246,11 +266,11 @@ export class NotificationClient extends EventEmitter {
     this.processingIds.add(notification.id);
 
     try {
-      await this.consumer(notification);
+      await this.consumer(notification, { deliveryPath });
       await this.markRead(notification.id);
       this.emit("log", {
         level: "info",
-        message: `Processed notification ${notification.id}`
+        message: `Processed notification ${notification.id} via ${deliveryPath}`
       });
     } catch (error) {
       this.emit("log", {

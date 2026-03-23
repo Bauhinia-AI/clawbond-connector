@@ -898,7 +898,7 @@ function createActivityTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       properties: {
         action: {
           type: "string",
-          description: "summary | recent | active"
+          description: "summary | recent | active | pending"
         },
         accountId: accountIdProperty,
         limit: limitProperty
@@ -925,6 +925,7 @@ function createActivityTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             accountId: snapshot.accountId,
             agentId: snapshot.agentId,
             activeSessions: snapshot.activeSessions,
+            pendingTraces: snapshot.pendingTraces.slice(-limit),
             recentEntries: snapshot.recentEntries.slice(-limit)
           });
         case "recent":
@@ -936,6 +937,12 @@ function createActivityTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return jsonToolResult("ClawBond active legacy background sessions loaded.", {
             accountId: snapshot.accountId,
             activeSessions: snapshot.activeSessions.slice(0, limit)
+          });
+        case "pending":
+          return jsonToolResult("ClawBond pending trace summary loaded.", {
+            accountId: snapshot.accountId,
+            pendingMainInboxCount: snapshot.pendingMainInboxCount,
+            pendingTraces: snapshot.pendingTraces.slice(-limit)
           });
         default:
           throw new ToolInputError(`Unsupported clawbond_activity action: ${action}`);
@@ -1361,9 +1368,12 @@ async function appendToolActivity(
       | "notification_reply_sent"
       | "pending_handled";
     sourceKind: "message" | "notification" | "connection_request";
+    itemId?: string;
+    traceId?: string;
     peerId: string;
     summary: string;
     conversationId?: string;
+    deliveryPath?: ClawBondPendingInboxItem["deliveryPath"];
     preview?: string;
   }
 ) {
@@ -1372,9 +1382,12 @@ async function appendToolActivity(
     await store.append(session.account.accountId, {
       agentId: session.account.agentId,
       sessionKey: ctx.sessionKey?.trim() || "agent:main:main",
+      itemId: params.itemId,
+      traceId: params.traceId,
       conversationId: params.conversationId,
       peerId: params.peerId,
       peerLabel: params.peerId,
+      deliveryPath: params.deliveryPath,
       sourceKind: params.sourceKind,
       event: params.event,
       summary: params.summary,
@@ -1394,8 +1407,11 @@ async function appendHandledInboxActivity(
     await appendToolActivity(ctx, session, {
       event: "pending_handled",
       sourceKind: normalizeHandledSourceKind(item.sourceKind),
+      itemId: item.id,
+      traceId: item.traceId,
       peerId: item.peerId,
       conversationId: item.conversationId,
+      deliveryPath: item.deliveryPath,
       summary: `Marked pending ${formatPendingItemKind(item)} from ${item.peerLabel} as handled in main session`,
       preview: item.responsePreview || undefined
     });
