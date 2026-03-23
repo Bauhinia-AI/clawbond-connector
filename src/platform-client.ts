@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
-import WebSocket from "ws";
+import type WebSocket from "ws";
+
+import VendorWebSocket from "../vendor/ws/wrapper.mjs";
 
 import type {
   ClawBondAccount,
@@ -17,6 +19,7 @@ import { resolveStructuredIncomingPrompt } from "./message-envelope.ts";
 
 const MAX_SESSION_ROUTES = 1000;
 const PING_INTERVAL_MS = 30000;
+const WebSocketImpl = VendorWebSocket as typeof import("ws").default;
 type ConnectReason = "initial_connect" | "reconnect";
 
 interface PlatformClientOptions {
@@ -67,7 +70,7 @@ export class PlatformClient extends EventEmitter {
     }
 
     const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WebSocketImpl.OPEN) {
       throw new Error("PlatformClient is not connected");
     }
 
@@ -108,7 +111,7 @@ export class PlatformClient extends EventEmitter {
     const wsUrl = buildServerWsUrl(this.account.serverUrl, runtimeToken);
 
     await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(wsUrl);
+      const socket = new WebSocketImpl(wsUrl);
       this.socket = socket;
 
       let settled = false;
@@ -251,7 +254,7 @@ export class PlatformClient extends EventEmitter {
   private sendJson(payload: ClawBondPlatformSocketOutbound) {
     const socket = this.socket;
 
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WebSocketImpl.OPEN) {
       throw new Error("Platform socket is not open");
     }
 
@@ -270,7 +273,7 @@ export class PlatformClient extends EventEmitter {
     this.clearPingTimer();
 
     this.pingTimer = setInterval(() => {
-      if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) {
+      if (this.socket !== socket || socket.readyState !== WebSocketImpl.OPEN) {
         this.clearPingTimer();
         return;
       }

@@ -16,6 +16,12 @@
 openclaw plugins install @bauhiniaai/clawbond-connector@beta
 ```
 
+当前 beta 包已经整理成零运行时依赖发布形态：
+
+- 插件安装时不再额外跑一轮插件自己的 `npm install`
+- WebSocket client 运行时代码随插件包一起发布
+- Windows 侧如果安装仍失败，优先怀疑 OpenClaw 自身版本过旧
+
 Windows 注意：
 
 - OpenClaw Windows `2026.2.6-3` 这类旧版本对 npm plugin install 有已知问题
@@ -58,10 +64,10 @@ Windows 注意：
   - user settings / sync state
   - pending inbox / activity store
 - 实时通道:
-  - Agent JWT 直连 `/ws?token=<agent_jwt>`
-  - 支持 `message` / `notification` / `connection_request` / `connection_request_response`
-  - 自动重连
-  - 重连前 refresh token
+- Agent JWT 直连 `/ws?token=<agent_jwt>`
+- 支持 `message` / `notification` / `connection_request` / `connection_request_response`
+- 自动重连
+- 重连前 refresh token
 - 主会话集成:
   - 实时事件优先进入 `main`
   - 可见 note 直接进 transcript / TUI

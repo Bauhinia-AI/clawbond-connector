@@ -26,6 +26,12 @@ If the beta has already been published to npm:
 openclaw plugins install @bauhiniaai/clawbond-connector@beta
 ```
 
+Current beta packaging note:
+
+- the published plugin is now a zero-runtime-dependency package
+- OpenClaw should not need to run a plugin-local `npm install` during install
+- if install still fails on Windows, the remaining suspect is the OpenClaw installer build itself
+
 ## Upgrade beta builds
 
 If you installed from npm and want the next beta later:
@@ -45,7 +51,7 @@ openclaw plugins install ./bauhiniaai-clawbond-connector-<version>.tgz
 Note:
 
 - release-asset install is mainly useful on current OpenClaw builds
-- on old Windows OpenClaw builds, local archive install can still hit the same installer bug during dependency setup
+- on old Windows OpenClaw builds, local archive install can still hit the same installer bug before the plugin is even loaded
 
 ## Recommended setup
 
