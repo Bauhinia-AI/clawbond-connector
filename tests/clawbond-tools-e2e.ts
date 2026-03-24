@@ -112,7 +112,18 @@ async function main() {
     }
 
     if (pathname === "/api/agent/capabilities" && method === "GET") {
-      send(200, { dm: true, learning: true });
+      send(200, {
+        can_dm: true,
+        can_learn: true,
+        can_propose_connection: true
+      });
+      return;
+    }
+
+    if (pathname === "/api/agent/ws" && method === "PUT") {
+      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
+      assert.deepEqual(body, { enabled: false });
+      send(200, { enabled: false });
       return;
     }
 
@@ -123,8 +134,31 @@ async function main() {
     }
 
     if (pathname === "/api/agent/capabilities" && method === "PUT") {
-      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
-      send(200, { ...(body as Record<string, unknown>) });
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: 403, data: null, message: "forbidden" }));
+      return;
+    }
+
+    if (pathname === "/api/conversations" && method === "GET") {
+      assert.equal(url.searchParams.get("page"), "2");
+      assert.equal(url.searchParams.get("limit"), "5");
+      assert.equal(url.searchParams.get("category"), "participated");
+      send(
+        200,
+        [{ id: "conv-1", name: "Peer thread" }],
+        { page: 2, page_size: 5, total: 1, total_pages: 1 }
+      );
+      return;
+    }
+
+    if (pathname === "/api/conversations/conv-1/messages" && method === "GET") {
+      assert.equal(url.searchParams.get("before"), "msg-prev");
+      assert.equal(url.searchParams.get("limit"), "5");
+      send(
+        200,
+        [{ id: "msg-old", sender_id: "peer-1", content: "Older message" }],
+        { has_more: false, next_cursor: null }
+      );
       return;
     }
 
@@ -204,11 +238,85 @@ async function main() {
       return;
     }
 
+    if (pathname === "/api/agent/messages/send-to-owner" && method === "POST") {
+      assert.deepEqual(body, {
+        content: "Owner follow-up",
+        msg_type: "text"
+      });
+      send(201, { conversation_id: "conv-owner-1", message_id: "msg-owner-1" });
+      return;
+    }
+
     if (pathname === "/api/conversations/conv-1/messages" && method === "POST") {
       assert.deepEqual(body, {
-        content: "Reply in thread"
+        content: "Reply in thread",
+        msg_type: "text",
+        reply_to_id: "msg-prev"
       });
       send(201, { conversation_id: "conv-1", message_id: "msg-2", to_agent_id: "peer-1" });
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/reports" && method === "GET") {
+      assert.equal(url.searchParams.get("page"), "1");
+      assert.equal(url.searchParams.get("limit"), "3");
+      send(200, [{ id: "report-1", title: "Memory consolidation" }], { page: 1, page_size: 3, total: 1 });
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/feedback" && method === "GET") {
+      assert.equal(url.searchParams.get("page"), "1");
+      assert.equal(url.searchParams.get("limit"), "3");
+      send(
+        200,
+        [{ id: "feedback-1", report_id: "report-1", feedback: "useful" }],
+        { page: 1, page_size: 3, total: 1 }
+      );
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/reports" && method === "POST") {
+      assert.deepEqual(body, {
+        title: "Learning note",
+        content: "Detailed content",
+        summary: "Short summary",
+        category: "knowledge_memory"
+      });
+      send(201, { id: "report-1", title: "Learning note" });
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/reports/report-1/feedback" && method === "GET") {
+      send(200, { score: 92, note: "Looks good" });
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/reports/report-1" && method === "PUT") {
+      assert.deepEqual(body, {
+        summary: "Updated summary"
+      });
+      send(200, { id: "report-1", summary: "Updated summary" });
+      return;
+    }
+
+    if (pathname === "/api/agent/learning/reports/report-1" && method === "DELETE") {
+      send(200, { deleted: true });
+      return;
+    }
+
+    if (pathname === "/api/agent/connection-requests" && method === "GET") {
+      assert.equal(url.searchParams.get("conversation_id"), "conv-1");
+      assert.equal(url.searchParams.get("status"), "pending");
+      send(200, [{ id: "req-1", conversation_id: "conv-1", status: "pending" }]);
+      return;
+    }
+
+    if (pathname === "/api/agent/notifications/send" && method === "POST") {
+      assert.deepEqual(body, {
+        content: "Start learning now",
+        type: "learn"
+      });
+      send(201, { id: "noti-1", content: "Start learning now", noti_type: "learn" });
       return;
     }
 
@@ -273,6 +381,9 @@ async function main() {
   const createPostTool = requireTool(tools, "clawbond_create_post");
   const commentTool = requireTool(tools, "clawbond_comment_post");
   const dmTool = requireTool(tools, "clawbond_dm");
+  const notificationsTool = requireTool(tools, "clawbond_notifications");
+  const learningReportsTool = requireTool(tools, "clawbond_learning_reports");
+  const connectionRequestsTool = requireTool(tools, "clawbond_connection_requests");
   const activityTool = requireTool(tools, "clawbond_activity");
 
   try {
@@ -319,6 +430,13 @@ async function main() {
     assert.equal(runtimeChannel["notificationsEnabled"], false);
     assert.equal(runtimeChannel["visibleMainSessionNotes"], false);
 
+    const serverWsUpdate = await registerTool.execute("tool-0c", {
+      action: "server_ws",
+      wsEnabled: false
+    });
+    assert.equal(serverWsUpdate.details["wsEnabled"], false);
+    assert.equal(serverWsUpdate.details["serverResult"]["enabled"], false);
+
     const statusResult = await statusTool.execute("tool-1", { action: "summary" });
     assert.equal(statusResult.details["profile"]["name"], "Tool Test Agent");
     assert.equal(statusResult.details["bindStatus"]["bound"], true);
@@ -331,14 +449,16 @@ async function main() {
     });
     assert.equal(updateProfileResult.details["updatedProfile"]["name"], "Tool Test Agent v2");
 
-    const updateCapabilitiesResult = await agentProfileTool.execute("tool-1c", {
-      action: "update_capabilities",
-      patch: {
-        dm: true,
-        learning: false
-      }
-    });
-    assert.equal(updateCapabilitiesResult.details["updatedCapabilities"]["learning"], false);
+    await assert.rejects(
+      agentProfileTool.execute("tool-1c", {
+        action: "update_capabilities",
+        patch: {
+          dm: true,
+          learning: false
+        }
+      }),
+      /no longer writable through the agent API/
+    );
 
     const feedResult = await feedTool.execute("tool-2", { action: "agent", limit: 5 });
     assert.equal(feedResult.details["items"][0]["id"], "post-1");
@@ -386,6 +506,23 @@ async function main() {
       body: "Legacy comment payload"
     });
     assert.equal(legacyCommentResult.details["createdComment"]["id"], "comment-1");
+
+    const conversationListResult = await dmTool.execute("tool-3g", {
+      action: "list_conversations",
+      page: 2,
+      limit: 5,
+      category: "participated"
+    });
+    assert.equal(conversationListResult.details["conversations"][0]["id"], "conv-1");
+    assert.equal(conversationListResult.details["pagination"]["page"], 2);
+
+    const messageListResult = await dmTool.execute("tool-3h", {
+      action: "list_messages",
+      conversationId: "conv-1",
+      before: "msg-prev",
+      limit: 5
+    });
+    assert.equal(messageListResult.details["messages"][0]["id"], "msg-old");
 
     const dmResult = await dmTool.execute("tool-4", {
       action: "send",
@@ -435,13 +572,74 @@ async function main() {
     const threadedResult = await dmTool.execute("tool-4b", {
       action: "send",
       conversationId: "conv-1",
-      content: "Reply in thread"
+      content: "Reply in thread",
+      msgType: "text",
+      replyToId: "msg-prev"
     });
     assert.equal(threadedResult.details["delivery"]["conversation_id"], "conv-1");
     assert.deepEqual(
       inboxStore.listPendingSync("default").map((item) => item.peerId),
       ["peer-2"]
     );
+
+    const ownerDmResult = await dmTool.execute("tool-4b-owner", {
+      action: "send_to_owner",
+      content: "Owner follow-up",
+      msgType: "text"
+    });
+    assert.equal(ownerDmResult.details["delivery"]["conversation_id"], "conv-owner-1");
+
+    const learningListResult = await learningReportsTool.execute("tool-4c", {
+      action: "list",
+      page: 1,
+      limit: 3
+    });
+    assert.equal(learningListResult.details["reports"][0]["id"], "report-1");
+    assert.equal(learningListResult.details["pagination"]["page"], 1);
+
+    const learningUploadResult = await learningReportsTool.execute("tool-4d", {
+      action: "upload",
+      title: "Learning note",
+      content: "Detailed content",
+      summary: "Short summary",
+      category: "knowledge_memory"
+    });
+    assert.equal(learningUploadResult.details["uploaded"]["id"], "report-1");
+
+    const learningFeedbackResult = await learningReportsTool.execute("tool-4e", {
+      action: "get_feedback",
+      reportId: "report-1"
+    });
+    assert.equal(learningFeedbackResult.details["feedback"]["score"], 92);
+
+    const learningFeedbackListResult = await learningReportsTool.execute("tool-4e-agg", {
+      action: "feedback",
+      page: 1,
+      limit: 3
+    });
+    assert.equal(learningFeedbackListResult.details["feedback"][0]["id"], "feedback-1");
+    assert.equal(learningFeedbackListResult.details["pagination"]["page"], 1);
+
+    const learningUpdateResult = await learningReportsTool.execute("tool-4f", {
+      action: "update",
+      reportId: "report-1",
+      summary: "Updated summary"
+    });
+    assert.equal(learningUpdateResult.details["updated"]["summary"], "Updated summary");
+
+    const notificationSendResult = await notificationsTool.execute("tool-4h", {
+      action: "send",
+      content: "Start learning now",
+      type: "learn"
+    });
+    assert.equal(notificationSendResult.details["sent"]["noti_type"], "learn");
+
+    const requestListResult = await connectionRequestsTool.execute("tool-4i", {
+      action: "list",
+      conversationId: "conv-1",
+      status: "pending"
+    });
+    assert.equal(requestListResult.details["requests"][0]["id"], "req-1");
 
     const activityResult = await activityTool.execute("tool-5", { action: "active" });
     assert.equal(activityResult.details["activeSessions"][0]["peerId"], "peer-1");
@@ -535,6 +733,14 @@ async function main() {
 
     await assert.rejects(
       nonOwnerRegisterTool.execute("tool-11", {
+        action: "server_ws",
+        wsEnabled: true
+      }),
+      /owner-only ClawBond action/
+    );
+
+    await assert.rejects(
+      nonOwnerRegisterTool.execute("tool-12", {
         action: "create",
         agentName: "Blocked Non Owner"
       }),
@@ -550,8 +756,17 @@ async function main() {
     assert.ok(
       seen.some((entry) => entry.pathname === "/api/agent-actions/posts/post-2/comments/unread")
     );
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/ws"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send-to-owner"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/conversations"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations/conv-1/messages"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/feedback"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports/report-1"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports/report-1/feedback"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/notifications/send"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/connection-requests"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/register"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/refresh"));
 

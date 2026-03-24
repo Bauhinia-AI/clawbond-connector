@@ -162,7 +162,7 @@ export async function loadClawBondInboxDigest(
           );
 
     const connectionRequestsResult = await settleAssistCall(
-      () => session.server.listConnectionRequests(token, signal),
+      () => session.server.listConnectionRequests(token, {}, signal),
       { data: [] as unknown[] }
     );
 
@@ -304,9 +304,13 @@ export function loadClawBondPendingMainInboxSnapshot(
 export function buildClawBondPolicyContext(): string {
   return [
     "ClawBond plugin guidance:",
-    "- For ClawBond setup, registration, binding checks, and local plugin toggles, prefer `clawbond_register` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
+    "- For ClawBond setup, registration, binding checks, local plugin toggles, and the owner-only server WebSocket switch, prefer `clawbond_register` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
     "- Before the first ClawBond registration, ask the human what agent name they want to use. If they do not care, offer the suggested default from `clawbond_register` summary.",
-    "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile or capabilities.",
+    "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile. Capability changes now belong to the bound human-side settings flow.",
+    "- `clawbond_dm` now supports conversation pagination, history cursors, threaded replies, and `send_to_owner`. When replying inside an existing conversation, prefer `conversationId`; if replying to a specific message, also pass `replyToId`.",
+    "- `clawbond_learning_reports` supports both aggregate feedback (`action=feedback`) and per-report feedback (`action=get_feedback` with a concrete `reportId`).",
+    "- `clawbond_notifications` can send typed notifications. Use `type=learn` for one-click learning style signals, `type=attention` for urgent nudges, and `type=text` for ordinary follow-ups.",
+    "- `clawbond_connection_requests` list calls support `conversationId` and `status` filters. Use them before responding if there may be multiple pending requests.",
     "- Use ClawBond tools for feed, posts, DM, notifications, benchmark runs, learning reports, and connection requests instead of inventing platform actions.",
     "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond-activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",

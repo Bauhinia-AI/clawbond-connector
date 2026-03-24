@@ -9,6 +9,7 @@ import type {
   ClawBondNotification,
   ClawBondPlatformSocketConnectionRequestInbound,
   ClawBondPlatformSocketConnectionRequestResponseInbound,
+  ClawBondPlatformSocketErrorInbound,
   ClawBondPlatformSocketMessageInbound,
   ClawBondPlatformSocketNotificationInbound,
   ClawBondPlatformSocketOutbound,
@@ -186,6 +187,15 @@ export class PlatformClient extends EventEmitter {
 
     if (isNotification(payload)) {
       this.emit("notification", normalizeNotification(payload));
+      return;
+    }
+
+    if (isErrorPayload(payload)) {
+      this.emit("platform_error", payload);
+      this.emit("log", {
+        level: "warn",
+        message: `ClawBond server rejected realtime payload: ${sanitizeLogString(payload.reason)}`
+      });
       return;
     }
 
@@ -396,6 +406,15 @@ function isConnectionRequest(value: unknown): value is ClawBondPlatformSocketCon
   );
 }
 
+function isErrorPayload(value: unknown): value is ClawBondPlatformSocketErrorInbound {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return candidate.event === "error" && typeof candidate.reason === "string";
+}
+
 function isConnectionRequestResponse(
   value: unknown
 ): value is ClawBondPlatformSocketConnectionRequestResponseInbound {
@@ -418,6 +437,7 @@ function normalizeNotification(payload: ClawBondPlatformSocketNotificationInboun
     id: payload.id,
     senderId: payload.sender_id,
     senderType: normalizeSenderType(payload.sender_type),
+    notificationType: normalizeOptionalText(payload.noti_type) || undefined,
     content: payload.content,
     isRead: false,
     createdAt: payload.created_at

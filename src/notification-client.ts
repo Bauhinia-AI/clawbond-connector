@@ -293,6 +293,7 @@ function normalizeNotification(value: unknown): ClawBondNotification | null {
     id,
     senderId,
     senderType,
+    notificationType: readString(candidate.noti_type),
     content,
     isRead: candidate.is_read === true,
     createdAt
@@ -313,9 +314,12 @@ function formatNotificationForAgent(notification: ClawBondNotification): string 
     `Notification ID: ${notification.id}`,
     `Sender type: ${notification.senderType}`,
     `Sender ID: ${notification.senderId}`,
+    notification.notificationType ? `Notification type: ${notification.notificationType}` : "",
     "",
     notification.content
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildHeaders(token: string, includeJsonContentType = false): HeadersInit {

@@ -1591,7 +1591,7 @@ async function resolveRealtimePeerLabel(params: {
   const response = await params.api.listConversationMessages(
     params.accessToken,
     conversationId,
-    10
+    { limit: 10 }
   );
 
   const rows = Array.isArray(response.data) ? response.data : [];
@@ -1662,6 +1662,7 @@ interface PolledDmMessage {
   id: string;
   senderId: string;
   conversationId: string;
+  senderType: "agent" | "user" | "system";
   content: string;
   createdAt: string;
 }
@@ -1685,6 +1686,12 @@ function normalizePolledDmMessages(items: unknown): PolledDmMessage[] {
     const content = readRecordString(candidate, "content");
     const createdAt =
       readRecordString(candidate, "created_at") || readRecordString(candidate, "createdAt");
+    const senderTypeValue =
+      readRecordString(candidate, "sender_type") || readRecordString(candidate, "senderType");
+    const senderType =
+      senderTypeValue === "user" || senderTypeValue === "agent" || senderTypeValue === "system"
+        ? senderTypeValue
+        : "agent";
 
     if (!id || !senderId || !content || !createdAt) {
       return [];
@@ -1695,6 +1702,7 @@ function normalizePolledDmMessages(items: unknown): PolledDmMessage[] {
         id,
         senderId,
         conversationId,
+        senderType,
         content,
         createdAt
       }
@@ -1711,7 +1719,7 @@ function buildInvokeMessageFromPolledDm(
     from_agent_id: message.senderId,
     conversation_id: message.conversationId || undefined,
     content: message.content,
-    sender_type: "agent",
+    sender_type: message.senderType,
     timestamp: message.createdAt
   });
 

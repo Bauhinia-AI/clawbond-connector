@@ -10,7 +10,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 interface ApiEnvelope<T> {
   code?: number;
-  data?: T;
+  data?: T | null;
   message?: string;
   pagination?: unknown;
 }
@@ -28,6 +28,23 @@ interface RequestOptions {
   json?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   signal?: AbortSignal;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "aborted" in (value as Record<string, unknown>) &&
+    typeof (value as { addEventListener?: unknown }).addEventListener === "function"
+  );
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 export class ClawBondHttpError extends Error {
@@ -72,13 +89,11 @@ class ClawBondApiClient {
     }
 
     const payload = (await response.json()) as ApiEnvelope<T>;
-    if (payload.data === undefined) {
-      throw new Error(`${pathname} returned no data payload`);
-    }
+    const data = ("data" in payload ? payload.data : null) as T;
 
     return {
       code: payload.code,
-      data: payload.data,
+      data,
       message: payload.message,
       pagination: payload.pagination
     };
@@ -124,6 +139,17 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     });
   }
 
+  public toggleWs(token: string, enabled: boolean, signal?: AbortSignal) {
+    return this.request<Record<string, unknown>>("/api/agent/ws", {
+      method: "PUT",
+      token,
+      signal,
+      json: {
+        enabled
+      }
+    });
+  }
+
   public getBoundUserProfile(token: string, signal?: AbortSignal) {
     return this.request<Record<string, unknown>>("/api/agent/bound-user/profile", { token, signal });
   }
@@ -156,20 +182,42 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     });
   }
 
-  public listConversations(token: string, signal?: AbortSignal) {
-    return this.request<unknown[]>("/api/conversations", { token, signal });
+  public listConversations(
+    token: string,
+    options: {
+      page?: number;
+      limit?: number;
+      category?: "proxy" | "recommended" | "participated";
+    } = {},
+    signal?: AbortSignal
+  ) {
+    return this.request<unknown[]>("/api/conversations", {
+      token,
+      signal,
+      query: {
+        page: options.page,
+        limit: options.limit,
+        category: options.category
+      }
+    });
   }
 
   public listConversationMessages(
     token: string,
     conversationId: string,
-    limit: number,
+    options: {
+      before?: string;
+      limit?: number;
+    } = {},
     signal?: AbortSignal
   ) {
     return this.request<unknown[]>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
       token,
       signal,
-      query: { limit }
+      query: {
+        before: options.before,
+        limit: options.limit
+      }
     });
   }
 
@@ -177,6 +225,7 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     token: string,
     toAgentId: string,
     content: string,
+    msgType?: string,
     signal?: AbortSignal
   ) {
     return this.request<Record<string, unknown>>("/api/agent/messages/send", {
@@ -185,7 +234,8 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
       signal,
       json: {
         to_agent_id: toAgentId,
-        content
+        content,
+        msg_type: msgType
       }
     });
   }
@@ -194,6 +244,10 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     token: string,
     conversationId: string,
     content: string,
+    options: {
+      msgType?: string;
+      replyToId?: string;
+    } = {},
     signal?: AbortSignal
   ) {
     return this.request<Record<string, unknown>>(
@@ -202,9 +256,30 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
         method: "POST",
         token,
         signal,
-        json: { content }
+        json: {
+          content,
+          msg_type: options.msgType,
+          reply_to_id: options.replyToId
+        }
       }
     );
+  }
+
+  public sendMessageToOwner(
+    token: string,
+    content: string,
+    msgType?: string,
+    signal?: AbortSignal
+  ) {
+    return this.request<Record<string, unknown>>("/api/agent/messages/send-to-owner", {
+      method: "POST",
+      token,
+      signal,
+      json: {
+        content,
+        msg_type: msgType
+      }
+    });
   }
 
   public pollMessages(token: string, after: string | undefined, limit: number, signal?: AbortSignal) {
@@ -247,21 +322,52 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     );
   }
 
-  public sendNotification(token: string, content: string, signal?: AbortSignal) {
+  public sendNotification(token: string, content: string, type?: string, signal?: AbortSignal) {
     return this.request<Record<string, unknown>>("/api/agent/notifications/send", {
       method: "POST",
       token,
       signal,
-      json: { content }
+      json: {
+        content,
+        type
+      }
     });
   }
 
-  public getLearningFeedback(token: string, signal?: AbortSignal) {
-    return this.request<unknown[]>("/api/agent/learning/feedback", { token, signal });
+  public listLearningReports(
+    token: string,
+    options: {
+      page?: number;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal
+  ) {
+    return this.request<unknown[]>("/api/agent/learning/reports", {
+      token,
+      signal,
+      query: {
+        page: options.page,
+        limit: options.limit
+      }
+    });
   }
 
-  public listLearningReports(token: string, signal?: AbortSignal) {
-    return this.request<unknown[]>("/api/agent/learning/reports", { token, signal });
+  public listLearningFeedback(
+    token: string,
+    options: {
+      page?: number;
+      limit?: number;
+    } = {},
+    signal?: AbortSignal
+  ) {
+    return this.request<unknown[]>("/api/agent/learning/feedback", {
+      token,
+      signal,
+      query: {
+        page: options.page,
+        limit: options.limit
+      }
+    });
   }
 
   public getLearningReport(token: string, reportId: string, signal?: AbortSignal) {
@@ -279,8 +385,8 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     payload: {
       title: string;
       content: string;
-      summary: string;
-      category: string;
+      summary?: string;
+      category?: string;
     },
     signal?: AbortSignal
   ) {
@@ -290,6 +396,28 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
       signal,
       json: payload
     });
+  }
+
+  public updateLearningReport(
+    token: string,
+    reportId: string,
+    payload: {
+      title?: string;
+      content?: string;
+      summary?: string;
+      category?: string;
+    },
+    signal?: AbortSignal
+  ) {
+    return this.request<Record<string, unknown>>(
+      `/api/agent/learning/reports/${encodeURIComponent(reportId)}`,
+      {
+        method: "PUT",
+        token,
+        signal,
+        json: payload
+      }
+    );
   }
 
   public deleteLearningReport(token: string, reportId: string, signal?: AbortSignal) {
@@ -304,7 +432,7 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
   }
 
   public getLearningReportFeedback(token: string, reportId: string, signal?: AbortSignal) {
-    return this.request<unknown[]>(
+    return this.request<Record<string, unknown>>(
       `/api/agent/learning/reports/${encodeURIComponent(reportId)}/feedback`,
       {
         token,
@@ -313,8 +441,22 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
     );
   }
 
-  public listConnectionRequests(token: string, signal?: AbortSignal) {
-    return this.request<unknown[]>("/api/agent/connection-requests", { token, signal });
+  public listConnectionRequests(
+    token: string,
+    options: {
+      conversationId?: string;
+      status?: string;
+    } = {},
+    signal?: AbortSignal
+  ) {
+    return this.request<unknown[]>("/api/agent/connection-requests", {
+      token,
+      signal,
+      query: {
+        conversation_id: options.conversationId,
+        status: options.status
+      }
+    });
   }
 
   public createConnectionRequest(

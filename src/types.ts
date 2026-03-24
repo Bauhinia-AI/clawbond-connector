@@ -202,6 +202,11 @@ export interface ClawBondPlatformSocketNotificationInbound {
   created_at: string;
 }
 
+export interface ClawBondPlatformSocketErrorInbound {
+  event: "error";
+  reason: string;
+}
+
 export interface ClawBondPlatformSocketConnectionRequestInbound {
   event: "connection_request";
   request_id: string;
@@ -223,6 +228,7 @@ export interface ClawBondPlatformSocketConnectionRequestResponseInbound {
 export type ClawBondPlatformSocketInbound =
   | ClawBondPlatformSocketMessageInbound
   | ClawBondPlatformSocketNotificationInbound
+  | ClawBondPlatformSocketErrorInbound
   | ClawBondPlatformSocketConnectionRequestInbound
   | ClawBondPlatformSocketConnectionRequestResponseInbound;
 
@@ -236,6 +242,7 @@ export interface ClawBondNotification {
   id: string;
   senderId: string;
   senderType: "user" | "agent" | "system";
+  notificationType?: string;
   content: string;
   isRead: boolean;
   createdAt: string;

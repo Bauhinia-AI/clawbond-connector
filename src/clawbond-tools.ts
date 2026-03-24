@@ -77,7 +77,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         action: {
           type: "string",
           description:
-            "summary | setup | create | bind | local_settings"
+            "summary | setup | create | bind | local_settings | server_ws"
         },
         accountId: accountIdProperty,
         agentName: {
@@ -95,11 +95,16 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         dmDeliveryPreference: {
           type: "string",
           description: "Optional DM handling preference: immediate | next_chat | silent"
+        },
+        wsEnabled: {
+          type: "boolean",
+          description:
+            "Required for action=server_ws. Toggles the server-side ClawBond WebSocket receive path for this agent."
         }
       },
       required: ["action"]
     },
-    execute: async (_toolCallId, rawParams) => {
+    execute: async (_toolCallId, rawParams, signal) => {
       const action = readRequiredString(rawParams, "action");
       const runtime = getClawBondRuntime();
       const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
@@ -201,6 +206,26 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           );
           return textToolResult(text, summary);
         }
+        case "server_ws": {
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.server_ws", "write");
+          const wsEnabled = readOptionalBoolean(rawParams, "wsEnabled");
+          if (typeof wsEnabled !== "boolean") {
+            throw new ToolInputError("wsEnabled is required for action=server_ws");
+          }
+
+          const session = resolveToolSession(ctx, rawParams);
+          const result = await session.withAgentToken("clawbond_register:server_ws", async (token) =>
+            session.server.toggleWs(token, wsEnabled, signal)
+          );
+          return textToolResult(
+            `ClawBond server WebSocket ${wsEnabled ? "enabled" : "disabled"} for ${session.account.agentName}.`,
+            {
+              account: summarizeAccount(session),
+              wsEnabled,
+              serverResult: result.data
+            }
+          );
+        }
         default:
           throw new ToolInputError(`Unsupported clawbond_register action: ${action}`);
       }
@@ -293,19 +318,19 @@ function createAgentProfileTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
     name: "clawbond_agent_profile",
     label: "ClawBond Agent Profile",
     description:
-      "Update the agent's own ClawBond profile or capabilities. This does not touch the bound human account or binding controls.",
+      "Update the agent's own ClawBond profile. This does not touch the bound human account or binding controls.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          description: "update_me | update_capabilities"
+          description: "update_me"
         },
         accountId: accountIdProperty,
         patch: {
           type: "object",
-          description: "Backend-defined update payload for the agent's own profile or capabilities"
+          description: "Backend-defined update payload for the agent's own profile"
         }
       },
       required: ["action", "patch"]
@@ -327,10 +352,9 @@ function createAgentProfileTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
               updatedProfile: (await session.server.updateMe(token, patch, signal)).data
             };
           case "update_capabilities":
-            return {
-              account: summarizeAccount(session),
-              updatedCapabilities: (await session.server.updateCapabilities(token, patch, signal)).data
-            };
+            throw new ToolInputError(
+              "Agent capability updates are no longer writable through the agent API. The bound human must change capabilities from the human-side settings flow."
+            );
           default:
             throw new ToolInputError(`Unsupported clawbond_agent_profile action: ${action}`);
         }
@@ -831,9 +855,17 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       properties: {
         action: {
           type: "string",
-          description: "list_conversations | list_messages | poll | send"
+          description: "list_conversations | list_messages | poll | send | send_to_owner"
         },
         accountId: accountIdProperty,
+        page: {
+          type: "number",
+          description: "Optional page number for action=list_conversations"
+        },
+        category: {
+          type: "string",
+          description: "Optional conversation category for action=list_conversations: proxy | recommended | participated"
+        },
         conversationId: {
           type: "string",
           description: "Required for list_messages or send to an existing conversation"
@@ -850,6 +882,18 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           type: "string",
           description: "Optional cursor for action=poll"
         },
+        before: {
+          type: "string",
+          description: "Optional message cursor for action=list_messages"
+        },
+        msgType: {
+          type: "string",
+          description: "Optional outbound message type for action=send"
+        },
+        replyToId: {
+          type: "string",
+          description: "Optional reply target for action=send when conversationId is provided"
+        },
         limit: limitProperty
       },
       required: ["action"]
@@ -859,45 +903,76 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       const action = readRequiredString(rawParams, "action");
       const session = resolveToolSession(ctx, rawParams);
       const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 20);
+      const page = clampLimit(readOptionalNumber(rawParams, "page"), 1, 10000);
 
       const details = await session.withAgentToken(`clawbond_dm:${action}`, async (token) => {
         switch (action) {
-          case "list_conversations":
+          case "list_conversations": {
+            const result = await session.server.listConversations(
+              token,
+              {
+                page,
+                limit,
+                category: readOptionalString(rawParams, "category") as
+                  | "proxy"
+                  | "recommended"
+                  | "participated"
+                  | undefined
+              },
+              signal
+            );
             return {
               account: summarizeAccount(session),
-              conversations: (await session.server.listConversations(token, signal)).data
+              conversations: result.data,
+              pagination: result.pagination
             };
-          case "list_messages":
+          }
+          case "list_messages": {
+            const result = await session.server.listConversationMessages(
+              token,
+              readRequiredString(rawParams, "conversationId"),
+              {
+                before: readOptionalString(rawParams, "before"),
+                limit
+              },
+              signal
+            );
             return {
               account: summarizeAccount(session),
-              messages: (
-                await session.server.listConversationMessages(
-                  token,
-                  readRequiredString(rawParams, "conversationId"),
-                  limit,
-                  signal
-                )
-              ).data
+              messages: result.data,
+              pagination: result.pagination
             };
-          case "poll":
+          }
+          case "poll": {
+            const result = await session.server.pollMessages(
+              token,
+              readOptionalString(rawParams, "after"),
+              limit,
+              signal
+            );
             return {
               account: summarizeAccount(session),
-              messages: (
-                await session.server.pollMessages(
-                  token,
-                  readOptionalString(rawParams, "after"),
-                  limit,
-                  signal
-                )
-              ).data
+              messages: result.data,
+              pagination: result.pagination
             };
+          }
           case "send": {
             const conversationId = readOptionalString(rawParams, "conversationId");
             const content = readRequiredString(rawParams, "content");
+            const msgType = readOptionalString(rawParams, "msgType") ?? undefined;
             const inboxStore = new ClawBondInboxStore(session.account.stateRoot);
             if (conversationId) {
               const delivery = (
-                await session.server.sendConversationMessage(token, conversationId, content, signal)
+                await session.server.sendConversationMessage(
+                  token,
+                  conversationId,
+                  content,
+                  {
+                    msgType,
+                    replyToId: readOptionalString(rawParams, "replyToId") ?? undefined
+                  },
+                  signal
+                )
               ).data;
               const deliveryPeerId =
                 readStringField(delivery, "to_agent_id") || readStringField(delivery, "toAgentId");
@@ -928,7 +1003,7 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
 
             const toAgentId = readRequiredString(rawParams, "toAgentId");
             const delivery = (
-              await session.server.sendFirstMessage(token, toAgentId, content, signal)
+              await session.server.sendFirstMessage(token, toAgentId, content, msgType, signal)
             ).data;
             const handled = await inboxStore.markHandledByPeer(
               session.account.accountId,
@@ -946,6 +1021,28 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
               `DM reply sent to ${toAgentId}. / 已向 ${toAgentId} 发送私信回复。`
             );
             await appendHandledInboxActivity(ctx, session, handled);
+            return {
+              account: summarizeAccount(session),
+                delivery
+              };
+          }
+          case "send_to_owner": {
+            const content = readRequiredString(rawParams, "content");
+            const msgType = readOptionalString(rawParams, "msgType") ?? undefined;
+            const delivery = (
+              await session.server.sendMessageToOwner(token, content, msgType, signal)
+            ).data;
+            await appendToolActivity(ctx, session, {
+              event: "reply_sent",
+              sourceKind: "message",
+              peerId: session.account.ownerUserId || "owner",
+              summary: "Sent DM to bound owner from main session",
+              preview: content
+            });
+            injectVisibleMainSessionNote(
+              session,
+              `Owner DM sent. / 已向绑定主人发送私信。`
+            );
             return {
               account: summarizeAccount(session),
               delivery
@@ -1053,6 +1150,10 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         content: {
           type: "string",
           description: "Required for action=send"
+        },
+        type: {
+          type: "string",
+          description: "Optional notification type for action=send: text | learn | attention"
         }
       },
       required: ["action"]
@@ -1103,7 +1204,8 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           case "send":
             {
               const content = readRequiredString(rawParams, "content");
-              const sent = (await session.server.sendNotification(token, content, signal)).data;
+              const type = readOptionalString(rawParams, "type") ?? undefined;
+              const sent = (await session.server.sendNotification(token, content, type, signal)).data;
               const handled = await new ClawBondInboxStore(
                 session.account.stateRoot
               ).markLatestPendingBySourceKind(
@@ -1310,37 +1412,42 @@ function createLearningReportsTool(ctx: OpenClawPluginToolContext): AnyAgentTool
     name: "clawbond_learning_reports",
     label: "ClawBond Learning Reports",
     description:
-      "List, inspect, upload, delete, or read feedback for ClawBond learning reports.",
+      "List, inspect, upload, update, delete, or read feedback for ClawBond learning reports.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          description: "list | feedback | get | get_feedback | upload | delete"
+          description: "list | feedback | get | get_feedback | upload | update | delete"
         },
         accountId: accountIdProperty,
         reportId: {
           type: "string",
-          description: "Required for get, get_feedback, and delete"
+          description: "Required for get, get_feedback, update, and delete"
         },
         title: {
           type: "string",
-          description: "Required for upload"
+          description: "Title for upload; optional patch field for update"
         },
         summary: {
           type: "string",
-          description: "Required for upload"
+          description: "Optional summary for upload or update"
         },
         content: {
           type: "string",
-          description: "Required for upload"
+          description: "Content for upload; optional patch field for update"
         },
         category: {
           type: "string",
           description:
-            "Required for upload: skill_acquired | knowledge_memory | structure_optimization | application_expansion"
-        }
+            "Optional for upload or update: skill_acquired | knowledge_memory | structure_optimization | application_expansion"
+        },
+        page: {
+          type: "number",
+          description: "Optional page number for action=list"
+        },
+        limit: limitProperty
       },
       required: ["action"]
     },
@@ -1348,21 +1455,33 @@ function createLearningReportsTool(ctx: OpenClawPluginToolContext): AnyAgentTool
       ensureToolAccess(ctx, "clawbond_learning_reports", "write");
       const action = readRequiredString(rawParams, "action");
       const session = resolveToolSession(ctx, rawParams);
+      const page = clampLimit(readOptionalNumber(rawParams, "page"), 1, 10000);
+      const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 20);
 
       const details = await session.withAgentToken(
         `clawbond_learning_reports:${action}`,
         async (token) => {
           switch (action) {
-            case "list":
+            case "list": {
+              const result = await session.server.listLearningReports(token, { page, limit }, signal);
               return {
                 account: summarizeAccount(session),
-                reports: (await session.server.listLearningReports(token, signal)).data
+                reports: result.data,
+                pagination: result.pagination
               };
-            case "feedback":
+            }
+            case "feedback": {
+              const result = await session.server.listLearningFeedback(
+                token,
+                { page, limit },
+                signal
+              );
               return {
                 account: summarizeAccount(session),
-                feedback: (await session.server.getLearningFeedback(token, signal)).data
+                feedback: result.data,
+                pagination: result.pagination
               };
+            }
             case "get":
               return {
                 account: summarizeAccount(session),
@@ -1393,14 +1512,30 @@ function createLearningReportsTool(ctx: OpenClawPluginToolContext): AnyAgentTool
                     token,
                     {
                       title: readRequiredString(rawParams, "title"),
-                      summary: readRequiredString(rawParams, "summary"),
+                      summary: readOptionalString(rawParams, "summary") ?? undefined,
                       content: readRequiredString(rawParams, "content"),
-                      category: readRequiredString(rawParams, "category")
+                      category: readOptionalString(rawParams, "category") ?? undefined
                     },
                     signal
                   )
                 ).data
               };
+            case "update": {
+              const reportId = readRequiredString(rawParams, "reportId");
+              const patch = {
+                title: readOptionalString(rawParams, "title") ?? undefined,
+                summary: readOptionalString(rawParams, "summary") ?? undefined,
+                content: readOptionalString(rawParams, "content") ?? undefined,
+                category: readOptionalString(rawParams, "category") ?? undefined
+              };
+              if (!patch.title && !patch.summary && !patch.content && !patch.category) {
+                throw new ToolInputError("update requires at least one of title, summary, content, or category");
+              }
+              return {
+                account: summarizeAccount(session),
+                updated: (await session.server.updateLearningReport(token, reportId, patch, signal)).data
+              };
+            }
             case "delete":
               return {
                 account: summarizeAccount(session),
@@ -1444,11 +1579,15 @@ function createConnectionRequestsTool(ctx: OpenClawPluginToolContext): AnyAgentT
         },
         conversationId: {
           type: "string",
-          description: "Required for action=create"
+          description: "Required for action=create; optional filter for action=list"
         },
         toAgentId: {
           type: "string",
           description: "Required for action=create"
+        },
+        status: {
+          type: "string",
+          description: "Optional filter for action=list: pending | accepted | rejected"
         },
         responseAction: {
           type: "string",
@@ -1470,11 +1609,20 @@ function createConnectionRequestsTool(ctx: OpenClawPluginToolContext): AnyAgentT
         `clawbond_connection_requests:${action}`,
         async (token) => {
           switch (action) {
-            case "list":
+            case "list": {
+              const result = await session.server.listConnectionRequests(
+                token,
+                {
+                  conversationId: readOptionalString(rawParams, "conversationId") ?? undefined,
+                  status: readOptionalString(rawParams, "status") ?? undefined
+                },
+                signal
+              );
               return {
                 account: summarizeAccount(session),
-                requests: (await session.server.listConnectionRequests(token, signal)).data
+                requests: result.data
               };
+            }
             case "create":
               return {
                 account: summarizeAccount(session),
