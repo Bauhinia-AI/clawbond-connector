@@ -60,9 +60,9 @@ function buildMessage(overrides: Partial<ClawBondInvokeMessage> = {}): ClawBondI
 }
 
 function main() {
-  assert.equal(deriveReceiveProfileFromLegacyDmPreference("immediate"), "realtime");
-  assert.equal(deriveReceiveProfileFromLegacyDmPreference("next_chat"), "balanced");
-  assert.equal(deriveReceiveProfileFromLegacyDmPreference("silent"), "focus");
+  assert.equal(deriveReceiveProfileFromLegacyDmPreference("immediate"), "aggressive");
+  assert.equal(deriveReceiveProfileFromLegacyDmPreference("next_chat"), "aggressive");
+  assert.equal(deriveReceiveProfileFromLegacyDmPreference("silent"), "aggressive");
 
   assert.deepEqual(buildRoutingMatrixForProfile("focus"), {
     owner_dm: "inject_main",
@@ -78,11 +78,11 @@ function main() {
   const fallbackFromLegacy = normalizeUserSettings({
     dm_delivery_preference: "silent"
   });
-  assert.equal(fallbackFromLegacy.receive_profile, "focus");
+  assert.equal(fallbackFromLegacy.receive_profile, "aggressive");
 
   const preservedExplicitProfile = normalizeUserSettings({
     dm_delivery_preference: "silent",
-    receive_profile: "aggressive"
+    receive_profile: "focus"
   });
   assert.equal(preservedExplicitProfile.receive_profile, "aggressive");
 
@@ -199,7 +199,7 @@ function main() {
         senderId: "agent-remote"
       })
     ),
-    { category: "remote_agent_dm", mode: "queue" }
+    { category: "remote_agent_dm", mode: "inject_main" }
   );
   assert.deepEqual(
     resolveInboundReceiveRouting(

@@ -452,7 +452,7 @@ export function buildClawBondSetupConfig(
   const visibleMainSessionNotes =
     typeof existingChannel.visibleMainSessionNotes === "boolean"
       ? existingChannel.visibleMainSessionNotes
-      : false;
+      : true;
 
   const nextChannel: Record<string, unknown> = { ...existingChannel };
 
@@ -477,7 +477,7 @@ export function buildClawBondSetupConfig(
     "bindStatusPollIntervalMs",
     DEFAULT_BIND_STATUS_POLL_INTERVAL_MS
   );
-  applyDefault(nextChannel, changedFields, "visibleMainSessionNotes", false);
+  applyDefault(nextChannel, changedFields, "visibleMainSessionNotes", true);
 
   if (explicitAgentName) {
     nextChannel.agentName = explicitAgentName;
@@ -534,9 +534,9 @@ export function buildClawBondDoctorReport(
     `- binding: ${summary.bindingStatus}`,
     `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
     `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
-    `- receive_profile: ${summary.receiveProfile}`,
+    `- receive_profile: ${summary.receiveProfile} (fixed local default)`,
     `- dm_delivery_preference (legacy): ${summary.dmDeliveryPreference}`,
-    `- server_ws: ${formatDoctorServerWsStatus(serverWsStatus)}`,
+    `- server_ws: ${formatDoctorServerWsStatus(serverWsStatus)} (managed by web)`,
     summary.inviteUrl ? `- invite: ${summary.inviteUrl}` : "",
     summary.agentName ? "" : `- suggested agent name: ${summary.suggestedAgentName}`,
     "",

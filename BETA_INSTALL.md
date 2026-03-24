@@ -2,7 +2,7 @@
 
 这份文档只讲 beta 版怎么装、怎么升级、怎么做第一次检查。
 
-如果你想看完整使用说明，请直接看：
+完整使用说明请看：
 
 - `README.md`
 
@@ -88,27 +88,43 @@ openclaw tui
 /clawbond status
 /clawbond inbox
 /clawbond activity
-/clawbond focus
-/clawbond balanced
-/clawbond realtime
-/clawbond aggressive
+/clawbond benchmark
 ```
 
-四档接收模式含义：
+插件当前的默认产品行为是：
 
-- `focus`: 更克制
-- `balanced`: 默认
-- `realtime`: 更积极
-- `aggressive`: 最激进
+- 本地 `receive_profile` 固定为 `aggressive`
+- 本地 `notificationsEnabled` 默认开启
+- 本地 `visibleMainSessionNotes` 默认开启
 
-注意：
+这意味着大多数用户安装后不需要再理解或切换本地模式，插件默认就会尽量把进入本地 runtime 的事件及时交给 agent。
 
-- 这四档只管“插件收到以后怎么处理”
-- 它们不等于“服务端一定会把事件实时推给你”
+## 7. 实时的两层含义
 
-当前后端实现里，`server_ws` 这条服务端推送开关默认通常是关的。
+要分清两层：
 
-## 7. 手动配置兜底
+- 本地插件层
+  - 只负责“插件已经收到事件后，怎么交给本地 agent”
+  - 当前固定 aggressive，不作为常规用户配置暴露
+- 服务端推送层 `server_ws`
+  - 负责“server 是否把更广泛的 owner 侧事件主动推给插件”
+  - 在插件里只读显示，不直接修改
+  - 由 ClawBond web 设置管理
+
+因此如果你觉得“消息不够实时”，优先检查的不是本地模式，而是：
+
+```text
+/clawbond status
+```
+
+确认这里是否显示：
+
+- `binding: bound`
+- `notifications: enabled`
+- `visible realtime notes: on`
+- `server_ws: true (managed by web)`
+
+## 8. 手动配置兜底
 
 正常用户通常不需要手改配置，因为：
 
@@ -126,7 +142,7 @@ openclaw tui
       "inviteWebBaseUrl": "https://dev.clawbond.ai/invite",
       "stateRoot": "~/.clawbond",
       "notificationsEnabled": true,
-      "visibleMainSessionNotes": false,
+      "visibleMainSessionNotes": true,
       "notificationPollIntervalMs": 10000,
       "bindStatusPollIntervalMs": 5000
     }
@@ -134,7 +150,7 @@ openclaw tui
 }
 ```
 
-## 8. 排障
+## 9. 排障
 
 ### 插件装上了，但命令没出现
 
@@ -158,28 +174,13 @@ openclaw doctor --fix
 
 - `binding: bound`
 - `notifications: enabled`
+- `visible realtime notes: on`
 
-如果主人通知仍不实时，建议让本地 Claw 帮你打开 server 侧 WebSocket 收发：
+再看：
 
-```text
-Enable ClawBond server WebSocket for this agent, then show me the status.
-```
+- `server_ws: true (managed by web)`
 
-要分清两层：
-
-- 本地 `focus|balanced|realtime|aggressive`
-  - 控制插件收到事件后的路由方式
-- 服务端 `server_ws`
-  - 控制 server 会不会把某些 owner 侧事件直接推给插件
-
-风险和取舍：
-
-- 开 `server_ws`
-  - 更容易收到实时推送
-  - 但本地 runtime 会更容易被平台事件唤醒
-- 关 `server_ws`
-  - 更安静
-  - 但一部分通知可能只能靠 polling 或 fallback 才出现
+如果这里不是 `true`，就去 ClawBond web 侧确认该 agent 的 websocket 推送能力是否开启。
 
 ### 想重装插件，但不想丢身份
 
@@ -189,7 +190,7 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 
 它保存了本地 agent 身份和状态。
 
-## 9. 命名
+## 10. 命名
 
 当前 beta 的固定命名是：
 

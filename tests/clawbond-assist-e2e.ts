@@ -259,13 +259,6 @@ async function main() {
     assert.match(rootHelpResult?.text ?? "", /\/clawbond setup/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond register/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond bind/);
-    assert.match(
-      rootHelpResult?.text ?? "",
-      /\/clawbond focus\|balanced\|realtime\|aggressive/
-    );
-    assert.match(rootHelpResult?.text ?? "", /\/clawbond notifications on\|off/);
-    assert.match(rootHelpResult?.text ?? "", /\/clawbond notes on\|off/);
-    assert.match(rootHelpResult?.text ?? "", /\/clawbond ws on\|off/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond doctor/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond status/);
 
@@ -287,21 +280,9 @@ async function main() {
     } as never);
     assert.match(rootDoctorResult?.text ?? "", /ClawBond doctor/);
     assert.match(rootDoctorResult?.text ?? "", /binding: bound/);
-    assert.match(rootDoctorResult?.text ?? "", /receive_profile: balanced/);
+    assert.match(rootDoctorResult?.text ?? "", /receive_profile: aggressive/);
+    assert.match(rootDoctorResult?.text ?? "", /visible realtime notes: on/);
     assert.match(rootDoctorResult?.text ?? "", /server_ws: true/);
-
-    const rootRealtimeResult = await rootCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond realtime",
-      args: "realtime",
-      config: cfg
-    } as never);
-    assert.match(rootRealtimeResult?.text ?? "", /ClawBond local settings updated/);
-    assert.match(
-      rootRealtimeResult?.text ?? "",
-      /receive profile: pending \(realtime; available after agent registration\)/
-    );
 
     const directDoctorResult = await doctorCommand?.handler({
       channel: "web",
@@ -321,7 +302,7 @@ async function main() {
     assert.equal(setupPlan.agentName, "Setup Agent");
     assert.equal(setupPlan.serverUrl, "https://api.clawbond.ai");
     assert.equal(setupPlan.socialBaseUrl, "https://social.clawbond.ai");
-    assert.equal(setupPlan.visibleMainSessionNotes, false);
+    assert.equal(setupPlan.visibleMainSessionNotes, true);
 
     let writtenConfig: Record<string, unknown> | null = null;
     const setupCommands = createClawBondCommands({
@@ -354,7 +335,7 @@ async function main() {
     assert.equal(writtenChannel.agentName, "Setup Agent");
     assert.equal(writtenChannel.serverUrl, "https://api.clawbond.ai");
     assert.equal(writtenChannel.socialBaseUrl, "https://social.clawbond.ai");
-    assert.equal(writtenChannel.visibleMainSessionNotes, false);
+    assert.equal(writtenChannel.visibleMainSessionNotes, true);
 
     const freshWelcome = buildClawBondWelcomeMessage({ channels: {} } as never) ?? "";
     assert.match(freshWelcome, /开始接入 ClawBond/);
@@ -384,77 +365,10 @@ async function main() {
       config: cfg
     } as never);
     assert.match(statusResult?.text ?? "", /binding: bound/);
-    assert.match(statusResult?.text ?? "", /visible realtime notes: off/);
-    assert.match(statusResult?.text ?? "", /receive_profile: balanced/);
+    assert.match(statusResult?.text ?? "", /visible realtime notes: on/);
+    assert.match(statusResult?.text ?? "", /receive_profile: aggressive/);
     assert.match(statusResult?.text ?? "", /dm_delivery_preference \(legacy\): immediate/);
     assert.match(statusResult?.text ?? "", /server_ws: true/);
-
-    let mutableCfg = cfg as Record<string, unknown>;
-    const runtimeCommands = createClawBondCommands({
-      config: mutableCfg as never,
-      runtime: {
-        config: {
-          loadConfig: () => mutableCfg as never,
-          writeConfigFile: async (nextCfg) => {
-            mutableCfg = nextCfg as Record<string, unknown>;
-          }
-        }
-      } as never
-    });
-    const runtimeRootCommand = runtimeCommands.find((entry) => entry.name === "clawbond");
-    assert.ok(runtimeRootCommand);
-
-    const notesOnResult = await runtimeRootCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond notes on",
-      args: "notes on",
-      config: mutableCfg
-    } as never);
-    assert.match(notesOnResult?.text ?? "", /ClawBond local settings updated/);
-    assert.match(notesOnResult?.text ?? "", /visible realtime notes: on/);
-
-    const notificationsOffResult = await runtimeRootCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond notifications off",
-      args: "notifications off",
-      config: mutableCfg
-    } as never);
-    assert.match(notificationsOffResult?.text ?? "", /ClawBond local settings updated/);
-    assert.match(notificationsOffResult?.text ?? "", /notifications: disabled/);
-
-    const wsOffResult = await runtimeRootCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond ws off",
-      args: "ws off",
-      config: mutableCfg
-    } as never);
-    assert.match(wsOffResult?.text ?? "", /ClawBond server WebSocket disabled/);
-
-    const runtimeDoctorCommand = runtimeCommands.find((entry) => entry.name === "clawbond-doctor");
-    const runtimeStatusCommand = runtimeCommands.find((entry) => entry.name === "clawbond-status");
-    assert.ok(runtimeDoctorCommand);
-    assert.ok(runtimeStatusCommand);
-
-    const doctorAfterWsOff = await runtimeDoctorCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond-doctor",
-      config: mutableCfg
-    } as never);
-    assert.match(doctorAfterWsOff?.text ?? "", /server_ws: false/);
-
-    const statusAfterLocalToggles = await runtimeStatusCommand?.handler({
-      channel: "web",
-      isAuthorizedSender: true,
-      commandBody: "/clawbond-status",
-      config: mutableCfg
-    } as never);
-    assert.match(statusAfterLocalToggles?.text ?? "", /notifications: disabled/);
-    assert.match(statusAfterLocalToggles?.text ?? "", /visible realtime notes: on/);
-    assert.match(statusAfterLocalToggles?.text ?? "", /server_ws: false/);
 
     const inboxResult = await inboxCommand?.handler({
       channel: "web",
@@ -589,7 +503,6 @@ async function main() {
     assert.ok(seenPaths.includes("/api/agent/notifications/unread-count"));
     assert.ok(seenPaths.includes("/api/agent/connection-requests"));
     assert.ok(seenPaths.includes("/api/agent/capabilities"));
-    assert.ok(seenPaths.includes("/api/agent/ws"));
 
     console.log("clawbond-assist E2E passed");
   } finally {

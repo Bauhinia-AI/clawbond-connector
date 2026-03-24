@@ -120,13 +120,6 @@ async function main() {
       return;
     }
 
-    if (pathname === "/api/agent/ws" && method === "PUT") {
-      assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
-      assert.deepEqual(body, { enabled: false });
-      send(200, { enabled: false });
-      return;
-    }
-
     if (pathname === "/api/agent/me" && method === "PUT") {
       assert.equal(req.headers.authorization, "Bearer agent_jwt_test");
       send(200, { id: "agent-local", name: (body as Record<string, unknown>).name ?? "Tool Test Agent" });
@@ -414,21 +407,16 @@ async function main() {
     });
     assert.equal(registerSummary.details["phase"], "ready");
     assert.equal(registerSummary.details["visibleMainSessionNotes"], true);
-    assert.equal(registerSummary.details["receiveProfile"], "balanced");
+    assert.equal(registerSummary.details["receiveProfile"], "aggressive");
 
     const onboardingUpdate = await registerTool.execute("tool-0b", {
       action: "local_settings",
       notificationsEnabled: false,
-      visibleMainSessionNotes: false,
-      receiveProfile: "focus"
+      visibleMainSessionNotes: false
     });
     assert.match(
       onboardingUpdate.content[0]?.type === "text" ? onboardingUpdate.content[0].text : "",
       /ClawBond local settings updated/
-    );
-    assert.match(
-      onboardingUpdate.content[0]?.type === "text" ? onboardingUpdate.content[0].text : "",
-      /receive profile: pending \(focus; available after agent registration\)/
     );
     const runtimeChannel = (
       runtimeConfig["channels"] as Record<string, unknown>
@@ -436,14 +424,7 @@ async function main() {
     assert.equal(runtimeChannel["notificationsEnabled"], false);
     assert.equal(runtimeChannel["visibleMainSessionNotes"], false);
     const postUpdateSettings = new CredentialStore(stateRoot).loadUserSettingsSync("default");
-    assert.equal(postUpdateSettings.receive_profile, "balanced");
-
-    const serverWsUpdate = await registerTool.execute("tool-0c", {
-      action: "server_ws",
-      wsEnabled: false
-    });
-    assert.equal(serverWsUpdate.details["wsEnabled"], false);
-    assert.equal(serverWsUpdate.details["serverResult"]["enabled"], false);
+    assert.equal(postUpdateSettings.receive_profile, "aggressive");
 
     const statusResult = await statusTool.execute("tool-1", { action: "summary" });
     assert.equal(statusResult.details["profile"]["name"], "Tool Test Agent");
@@ -741,14 +722,6 @@ async function main() {
 
     await assert.rejects(
       nonOwnerRegisterTool.execute("tool-11", {
-        action: "server_ws",
-        wsEnabled: true
-      }),
-      /owner-only ClawBond action/
-    );
-
-    await assert.rejects(
-      nonOwnerRegisterTool.execute("tool-12", {
         action: "create",
         agentName: "Blocked Non Owner"
       }),
@@ -764,7 +737,6 @@ async function main() {
     assert.ok(
       seen.some((entry) => entry.pathname === "/api/agent-actions/posts/post-2/comments/unread")
     );
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/ws"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send-to-owner"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations"));

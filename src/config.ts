@@ -257,7 +257,7 @@ function resolveNotificationsEnabled(value: unknown): boolean {
     return value;
   }
 
-  return false;
+  return true;
 }
 
 function resolveVisibleMainSessionNotes(value: unknown): boolean {
@@ -265,7 +265,7 @@ function resolveVisibleMainSessionNotes(value: unknown): boolean {
     return value;
   }
 
-  return false;
+  return true;
 }
 
 function resolveBootstrapEnabled(

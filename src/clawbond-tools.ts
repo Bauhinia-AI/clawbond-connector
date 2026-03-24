@@ -17,8 +17,6 @@ import {
 import { queueMainSessionVisibleNote } from "./openclaw-cli.ts";
 import { getClawBondRuntime } from "./runtime.ts";
 import type {
-  ClawBondDmDeliveryPreference,
-  ClawBondReceiveProfile,
   ClawBondPendingInboxItem
 } from "./types.ts";
 import {
@@ -78,7 +76,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         action: {
           type: "string",
           description:
-            "summary | setup | create | bind | local_settings | server_ws"
+            "summary | setup | create | bind | local_settings"
         },
         accountId: accountIdProperty,
         agentName: {
@@ -92,20 +90,6 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         visibleMainSessionNotes: {
           type: "boolean",
           description: "Toggle visible [ClawBond] notes in the main OpenClaw chat."
-        },
-        dmDeliveryPreference: {
-          type: "string",
-          description: "Optional DM handling preference: immediate | next_chat | silent"
-        },
-        receiveProfile: {
-          type: "string",
-          description:
-            "Optional inbound receive profile: focus | balanced | realtime | aggressive"
-        },
-        wsEnabled: {
-          type: "boolean",
-          description:
-            "Required for action=server_ws. Toggles the server-side ClawBond WebSocket receive gate for this agent. This is separate from the local receive profile and changes whether some owner-side realtime events are pushed at all."
         }
       },
       required: ["action"]
@@ -127,7 +111,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             `- binding: ${summary.bindingStatus}`,
             `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
             `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
-            `- receive profile: ${summary.receiveProfile}`,
+            `- receive profile: ${summary.receiveProfile} (fixed local default)`,
             `- next: ${summary.nextStep}`
           ];
           if (summary.inviteUrl) {
@@ -184,56 +168,18 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         }
         case "local_settings": {
           ensureOwnerOnlyToolAccess(ctx, "clawbond_register.local_settings", "write");
-          const dmDeliveryPreferenceRaw = readOptionalString(rawParams, "dmDeliveryPreference");
-          if (
-            dmDeliveryPreferenceRaw &&
-            dmDeliveryPreferenceRaw !== "immediate" &&
-            dmDeliveryPreferenceRaw !== "next_chat" &&
-            dmDeliveryPreferenceRaw !== "silent"
-          ) {
-            throw new ToolInputError(
-              "dmDeliveryPreference must be immediate, next_chat, or silent"
-            );
-          }
-          const dmDeliveryPreference =
-            (dmDeliveryPreferenceRaw as ClawBondDmDeliveryPreference | undefined) ?? null;
-          const receiveProfileRaw = readOptionalString(rawParams, "receiveProfile");
-          const receiveProfile = normalizeReceiveProfileInput(receiveProfileRaw);
-
           const text = await runClawBondLocalConfigUpdate({
             cfg: ctx.config,
             runtime,
             accountId,
             notificationsEnabled: readOptionalBoolean(rawParams, "notificationsEnabled"),
-            visibleMainSessionNotes: readOptionalBoolean(rawParams, "visibleMainSessionNotes"),
-            dmDeliveryPreference,
-            receiveProfile
+            visibleMainSessionNotes: readOptionalBoolean(rawParams, "visibleMainSessionNotes")
           });
           const summary = buildClawBondOnboardingSummary(
             runtime.config?.loadConfig?.() ?? ctx.config,
             accountId
           );
           return textToolResult(text, summary);
-        }
-        case "server_ws": {
-          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.server_ws", "write");
-          const wsEnabled = readOptionalBoolean(rawParams, "wsEnabled");
-          if (typeof wsEnabled !== "boolean") {
-            throw new ToolInputError("wsEnabled is required for action=server_ws");
-          }
-
-          const session = resolveToolSession(ctx, rawParams);
-          const result = await session.withAgentToken("clawbond_register:server_ws", async (token) =>
-            session.server.toggleWs(token, wsEnabled, signal)
-          );
-          return textToolResult(
-            `ClawBond server WebSocket ${wsEnabled ? "enabled" : "disabled"} for ${session.account.agentName}. This changes the server-side push gate, not the local receive profile.`,
-            {
-              account: summarizeAccount(session),
-              wsEnabled,
-              serverResult: result.data
-            }
-          );
         }
         default:
           throw new ToolInputError(`Unsupported clawbond_register action: ${action}`);
@@ -1704,18 +1650,6 @@ function resolveToolSession(
     ctx.config,
     readOptionalString(params, "accountId") ?? ctx.agentAccountId
   );
-}
-
-function normalizeReceiveProfileInput(value: string | undefined): ClawBondReceiveProfile | null {
-  if (!value) {
-    return null;
-  }
-
-  if (value === "focus" || value === "balanced" || value === "realtime" || value === "aggressive") {
-    return value;
-  }
-
-  throw new ToolInputError("receiveProfile must be focus, balanced, realtime, or aggressive");
 }
 
 function summarizeAccount(session: ClawBondToolSession) {

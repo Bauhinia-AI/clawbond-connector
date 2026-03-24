@@ -1,10 +1,8 @@
 import type {
   OpenClawPluginApi,
-  OpenClawPluginCommandDefinition,
-  PluginCommandContext
+  OpenClawPluginCommandDefinition
 } from "openclaw/plugin-sdk";
 
-import { ClawBondToolSession } from "./clawbond-api.ts";
 import {
   formatActivitySnapshotForCommand,
   formatInboxDigestForCommand,
@@ -16,13 +14,12 @@ import {
 } from "./clawbond-assist.ts";
 import {
   buildClawBondDoctorReport,
-  runClawBondLocalConfigUpdate,
   runClawBondRegisterBind,
   runClawBondRegisterCreate,
   runClawBondSetup
 } from "./clawbond-onboarding.ts";
+import { ClawBondToolSession } from "./clawbond-api.ts";
 import { CredentialStore } from "./credential-store.ts";
-import type { ClawBondReceiveProfile } from "./types.ts";
 
 export function registerClawBondCommands(api: OpenClawPluginApi) {
   for (const command of createClawBondCommands(api)) {
@@ -115,77 +112,6 @@ export function createClawBondCommands(
           const serverWsStatus = await loadClawBondServerWsStatus(liveConfig, parsed.accountId);
           return {
             text: buildClawBondDoctorReport(liveConfig, parsed.accountId, serverWsStatus)
-          };
-        }
-
-        if (isReceiveProfileSubcommand(parsed.subcommand)) {
-          if (!ctx.isAuthorizedSender) {
-            return {
-              text: "ClawBond receive mode changes are owner-only in this local runtime."
-            };
-          }
-
-          return {
-            text: await runClawBondLocalConfigUpdate({
-              cfg: liveConfig,
-              runtime: api.runtime,
-              accountId: parsed.accountId,
-              receiveProfile: parsed.subcommand
-            })
-          };
-        }
-
-        if (parsed.subcommand === "notifications") {
-          if (!ctx.isAuthorizedSender) {
-            return {
-              text: "ClawBond notification toggles are owner-only in this local runtime."
-            };
-          }
-
-          const toggle = parseOnOffArgument(parsed.args[0] ?? null);
-          if (toggle === null) {
-            return {
-              text: "Usage: /clawbond notifications on|off [accountId]"
-            };
-          }
-
-          return {
-            text: await runClawBondLocalConfigUpdate({
-              cfg: liveConfig,
-              runtime: api.runtime,
-              accountId: parsed.args[1] ?? null,
-              notificationsEnabled: toggle
-            })
-          };
-        }
-
-        if (parsed.subcommand === "notes") {
-          if (!ctx.isAuthorizedSender) {
-            return {
-              text: "ClawBond visible note toggles are owner-only in this local runtime."
-            };
-          }
-
-          const toggle = parseOnOffArgument(parsed.args[0] ?? null);
-          if (toggle === null) {
-            return {
-              text: "Usage: /clawbond notes on|off [accountId]"
-            };
-          }
-
-          return {
-            text: await runClawBondLocalConfigUpdate({
-              cfg: liveConfig,
-              runtime: api.runtime,
-              accountId: parsed.args[1] ?? null,
-              visibleMainSessionNotes: toggle
-            })
-          };
-        }
-
-        if (parsed.subcommand === "ws") {
-          return {
-            text: await runClawBondServerWsCommand(liveConfig, ctx, parsed.args)
           };
         }
 
@@ -335,22 +261,17 @@ type ClawBondRootSubcommand =
   | "status"
   | "inbox"
   | "activity"
-  | "benchmark"
-  | "notifications"
-  | "notes"
-  | "ws"
-  | ClawBondReceiveProfile;
+  | "benchmark";
 
 function parseClawBondRootArgs(
   value: string | undefined
 ): {
   subcommand: ClawBondRootSubcommand | null | string;
   accountId: string | null;
-  args: string[];
   remainder: string | null;
 } {
   if (!value?.trim()) {
-    return { subcommand: null, accountId: null, args: [], remainder: null };
+    return { subcommand: null, accountId: null, remainder: null };
   }
 
   const [rawSubcommand, ...rest] = value.trim().split(/\s+/);
@@ -358,7 +279,6 @@ function parseClawBondRootArgs(
   const remainder = rest.length > 0 ? rest.join(" ").trim() : null;
   return {
     subcommand,
-    args: rest,
     accountId: remainder || null,
     remainder: remainder || null
   };
@@ -371,66 +291,16 @@ function formatClawBondCommandHelp(): string {
     "- `/clawbond setup [agentName]` - write the recommended local config automatically / 自动写入推荐本地配置",
     "- `/clawbond register <agentName>` - create the ClawBond agent explicitly / 显式注册 ClawBond agent",
     "- `/clawbond bind [accountId]` - re-check browser binding and refresh local credentials / 重新检查网页绑定并刷新本地凭证",
-    "- `/clawbond focus|balanced|realtime|aggressive [accountId]` - switch local receive mode / 切换本地接收模式",
-    "- `/clawbond notifications on|off [accountId]` - toggle local notification ingest / 开关本地通知接收",
-    "- `/clawbond notes on|off [accountId]` - toggle visible [ClawBond] notes / 开关主会话里的可见提示",
-    "- `/clawbond ws on|off [accountId]` - toggle server-side realtime push gate / 开关服务端实时推送闸门",
     "- `/clawbond doctor [accountId]` - inspect install, binding, and next step / 检查安装、绑定和下一步",
     "- `/clawbond status [accountId]` - read-only account, binding, local settings / 查看账号、绑定、插件设置（只读）",
     "- `/clawbond inbox [accountId]` - unread DMs, notifications, requests / 查看未读私信、通知、请求",
     "- `/clawbond activity [accountId]` - recent realtime/plugin activity / 查看近期实时活动",
     "- `/clawbond benchmark [latest|latest_user|run <runId>|cases <runId>]` - inspect benchmark state / 查看 benchmark 状态",
-    "- receive mode quick picks / 接收模式速记:",
-    "  `focus` = quieter, `balanced` = default, `realtime` = faster, `aggressive` = everything immediate",
     "- realtime note / 实时说明:",
-    "  local receive mode routes events after arrival; `server_ws` controls whether some owner-side events are pushed from the server in realtime at all",
+    "  local plugin routing is fixed aggressive; local notifications and visible main-session notes default to on",
+    "  `server_ws` is read-only here and managed from ClawBond web settings",
     "- direct aliases / 直接别名: `/clawbond-setup`, `/clawbond-register`, `/clawbond-bind`, `/clawbond-doctor`, `/clawbond-status`, `/clawbond-inbox`, `/clawbond-activity`, `/clawbond-benchmark`",
     "- natural-language tip / 自然语言提示: 你也可以直接对 agent 说“开始接入 ClawBond”或“用这个名字注册 ClawBond”"
-  ].join("\n");
-}
-
-function isReceiveProfileSubcommand(value: string | null): value is ClawBondReceiveProfile {
-  return (
-    value === "focus" ||
-    value === "balanced" ||
-    value === "realtime" ||
-    value === "aggressive"
-  );
-}
-
-function parseOnOffArgument(value: string | null): boolean | null {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === "on" || normalized === "true" || normalized === "enable" || normalized === "enabled") {
-    return true;
-  }
-  if (normalized === "off" || normalized === "false" || normalized === "disable" || normalized === "disabled") {
-    return false;
-  }
-  return null;
-}
-
-async function runClawBondServerWsCommand(
-  cfg: { channels?: Record<string, unknown> },
-  ctx: PluginCommandContext,
-  args: string[]
-): Promise<string> {
-  if (!ctx.isAuthorizedSender) {
-    return "ClawBond server WebSocket toggles are owner-only in this local runtime.";
-  }
-
-  const toggle = parseOnOffArgument(args[0] ?? null);
-  if (toggle === null) {
-    return "Usage: /clawbond ws on|off [accountId]";
-  }
-
-  const session = new ClawBondToolSession(cfg as never, args[1] ?? null);
-  const result = await session.withAgentToken("clawbond_command:server_ws", (token) =>
-    session.server.toggleWs(token, toggle)
-  );
-  return [
-    `ClawBond server WebSocket ${toggle ? "enabled" : "disabled"} for ${session.account.agentName}.`,
-    "- this changes the server-side realtime push gate, not the local receive profile",
-    `- server result: ${JSON.stringify(result.data)}`
   ].join("\n");
 }
 

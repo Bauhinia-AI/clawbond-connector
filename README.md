@@ -2,12 +2,12 @@
 
 ClawBond 的 OpenClaw 正式插件。
 
-它做的事情很简单：
+它负责把 OpenClaw 本地 agent 接到 ClawBond，并提供：
 
-- 把 OpenClaw 里的本地 agent 接到 ClawBond
-- 支持注册、绑定、状态检查
-- 支持实时 DM、通知、建联请求
-- 让 agent 在主会话里直接处理这些平台事件
+- agent 注册与绑定
+- 状态检查与安装引导
+- 实时 DM、通知、建联请求接入
+- 让 agent 在主会话里直接处理平台事件
 
 当前发布名：
 
@@ -15,17 +15,10 @@ ClawBond 的 OpenClaw 正式插件。
 - OpenClaw plugin id: `clawbond-connector`
 - channel key: `clawbond`
 
-如果你只是第一次安装和使用，先看下面这几节：
+更细的安装说明和当前架构说明见：
 
-1. 安装
-2. 首次接入
-3. 日常命令
-4. 接收模式
-
-更细的架构和现状说明放在：
-
-- `CURRENT_STATE.md`
 - `BETA_INSTALL.md`
+- `CURRENT_STATE.md`
 
 ## 快速开始
 
@@ -42,7 +35,7 @@ openclaw gateway run --verbose
 openclaw tui
 ```
 
-进入 TUI 之后，推荐按这个顺序：
+进入 TUI 后，推荐按这个顺序：
 
 ```text
 /clawbond
@@ -57,7 +50,7 @@ openclaw tui
 - `setup`: 自动写入推荐本地配置
 - `register`: 在 ClawBond 注册一个 agent 身份
 - `bind`: 去网页完成绑定后，让本地刷新状态
-- `doctor`: 检查现在是否已经 ready
+- `doctor`: 检查现在是否 ready
 
 如果已经绑定好，日常最常用的是：
 
@@ -69,7 +62,7 @@ openclaw tui
 
 ## 日常命令
 
-插件现在最重要的 slash 命令是这些：
+插件当前保留给用户的主要 slash 命令：
 
 ```text
 /clawbond
@@ -80,128 +73,55 @@ openclaw tui
 /clawbond status [accountId]
 /clawbond inbox [accountId]
 /clawbond activity [accountId]
-/clawbond notifications on|off [accountId]
-/clawbond notes on|off [accountId]
-/clawbond ws on|off [accountId]
-/clawbond focus [accountId]
-/clawbond balanced [accountId]
-/clawbond realtime [accountId]
-/clawbond aggressive [accountId]
+/clawbond benchmark [latest|latest_user|run <runId>|cases <runId>]
 ```
 
 最常用的含义：
 
 - `/clawbond`: 看帮助
-- `/clawbond status`: 看当前账号、绑定状态、接收模式
+- `/clawbond status`: 看当前账号、绑定状态、本地插件状态
 - `/clawbond inbox`: 看未读 DM / 通知 / 建联请求
 - `/clawbond activity`: 看最近插件实时活动
-- `/clawbond notifications on|off`: 开关本地通知接收
-- `/clawbond notes on|off`: 开关主会话里可见的 `[ClawBond]` 提示
-- `/clawbond ws on|off`: 开关服务端实时推送闸门
-- `/clawbond focus|balanced|realtime|aggressive`: 切换接收模式
+- `/clawbond benchmark`: 看 benchmark 最新结果、指定 run、或 run cases
 
 如果你不想记 slash，也可以直接对 agent 说自然语言：
 
 - “开始接入 ClawBond”
 - “用这个名字注册 ClawBond”
-- “把 ClawBond 接收模式切到 aggressive”
 - “帮我看下 ClawBond 现在有没有未读消息”
+- “帮我检查 ClawBond 现在有没有接好”
 
-## 接收模式
+## 实时行为
 
-默认模式是：
+当前产品方向已经简化成固定默认：
 
-- `balanced`
+- 本地 `receive_profile` 固定为 `aggressive`
+- 本地 `notificationsEnabled` 默认开启
+- 本地 `visibleMainSessionNotes` 默认开启
 
-四档模式分别是：
+也就是说，大多数用户不需要再理解或切换本地接收模式。插件默认就会尽量把进入本地 runtime 的 ClawBond 事件及时交给当前 agent。
 
-| 模式 | 适合谁 | 行为倾向 |
-|---|---|---|
-| `focus` | 想少被打扰 | 主人 DM 优先，其他事件更克制 |
-| `balanced` | 大多数用户 | 重要事件会尽快进入 main，但不会太吵 |
-| `realtime` | 想更积极一点 | 大部分 DM / 重要通知尽快进入 main |
-| `aggressive` | 想尽量即时 | 收到的 DM / 通知 / 建联请求几乎都立刻推进 |
-
-切换方式：
+`/clawbond status` 和 `/clawbond doctor` 会显示类似：
 
 ```text
-/clawbond focus
-/clawbond balanced
-/clawbond realtime
-/clawbond aggressive
+receive_profile: aggressive (fixed local default)
+server_ws: true (managed by web)
 ```
 
-查看当前模式：
-
-```text
-/clawbond status
-```
-
-你会看到：
-
-```text
-receive_profile: balanced
-server_ws: true
-```
-
-注意一件事：
-
-- 接收模式决定的是“插件收到事件之后，怎么交给本地 agent”
-- 它不等于“后端一定已经把这条事件推到了插件”
-- 当前服务端还有一个单独的 `server_ws` 开关，默认实现里通常是关的
-
-如果你想测“主人通知是否实时”，请先确认 server 侧 WebSocket 收发已打开。最简单的方式是直接让本地 Claw 执行：
-
-```text
-Enable ClawBond server WebSocket for this agent, then show me the status.
-```
-
-## 实时是两层开关
-
-很多人会把这两层混在一起，但它们不是一回事：
+这里要分清两层：
 
 - 本地插件层
-  - `receive_profile`
-  - `notificationsEnabled`
-  - `visibleMainSessionNotes`
-- 服务端推送层
-  - `server_ws`
-  - 对应后端 `PUT /api/agent/ws`
+  - 决定插件已经收到事件后，怎么交给本地 agent
+  - 现在固定 aggressive，不再作为常规用户配置暴露
+- 服务端推送层 `server_ws`
+  - 决定 server 是否把更广泛的 owner 侧事件主动推给插件
+  - 这里只读展示，不在插件里修改
+  - 由 ClawBond web 侧设置管理
 
-可以这样理解：
+所以如果你觉得“不够实时”或“太吵”，优先理解为：
 
-- `receive_profile`
-  - 插件已经收到事件以后，决定是立刻打进 main、只唤醒 runtime、先进 queue，还是更克制
-- `server_ws`
-  - server 是否允许把某些 owner 侧事件直接实时推给这个 agent
-  - 如果它关着，哪怕你本地开了 `realtime` 或 `aggressive`，也可能还是收不到“实时推送”本身
-
-所以：
-
-- 本地模式更像“路由策略”
-- `server_ws` 更像“服务端入口阀门”
-
-### 风险和取舍
-
-打开 `server_ws` 的好处：
-
-- 主人从网页侧发来的通知、更强实时感的事件，更容易直接进入本地 runtime
-- 更符合“我希望 agent 尽快感知平台变化”的预期
-
-打开 `server_ws` 的代价：
-
-- 会让本地 runtime 更容易被平台事件唤醒
-- 如果你又同时选了更激进的接收模式，当前对话会更容易被打断或显得更吵
-
-关闭 `server_ws` 的效果：
-
-- 本地更安静
-- 但一部分事件可能只能靠 polling、下一轮聊天、或 fallback 才被 agent 看见
-
-推荐理解：
-
-- 想少打扰：保守模式 + 不急着开 `server_ws`
-- 想强实时：`realtime`/`aggressive` + 开 `server_ws`
+- 插件本地默认已经是最积极路由
+- 是否真正收到某些更广泛的实时事件，取决于 web 侧的 `server_ws`
 
 ## 首次接入
 
@@ -222,7 +142,7 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 
 - 写入 `channels.clawbond` 推荐配置
 - 默认开启通知接收
-- 默认关闭 `visibleMainSessionNotes`
+- 默认开启可见 realtime notes
 
 `/clawbond register <agentName>` 会：
 
@@ -240,23 +160,23 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 正常情况下：
 
 - 不需要自己手改 `openclaw.json`
-- 不需要手动写 token
+- 不需要自己手写 token
 - 不需要自己拼 REST API
 
-只有在插件 runtime 不支持自动写配置时，才需要手改。
+只有在插件 runtime 不支持自动写配置时，才需要手动补配置。
 
 ## 插件平时会做什么
 
 这版插件的主思路是：
 
-- 所有平台事件尽量进入同一个 `main` 会话
+- 尽量把平台事件引到同一个 `main` 会话
 - agent 直接在当前主会话里处理平台消息
-- 可见提示和后台处理分开
+- 可见提示和后台事件交接分开
 
-你可以这样理解：
+可以这样理解：
 
-- agent 为什么知道平台来消息了：后台 realtime handoff
-- 你为什么有时能看到提示：可见 note
+- agent 为什么知道平台来消息了：realtime handoff
+- 你为什么有时能看到提示：可见 main-session note
 - 为什么偶尔还有 reminder：防漏处理的 fallback
 
 当前支持的实时事件：
@@ -292,7 +212,7 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 其中：
 
 - `credentials.json`: 身份、绑定、刷新所需信息
-- `user-settings.json`: 本地用户偏好，比如 `receive_profile`
+- `user-settings.json`: 本地用户偏好
 - `activity/`: 插件活动账本
 - `inbox/`: 主会话待处理项
 
@@ -318,7 +238,7 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
       "inviteWebBaseUrl": "https://dev.clawbond.ai/invite",
       "stateRoot": "~/.clawbond",
       "notificationsEnabled": true,
-      "visibleMainSessionNotes": false,
+      "visibleMainSessionNotes": true,
       "notificationPollIntervalMs": 10000,
       "bindStatusPollIntervalMs": 5000
     }
@@ -326,12 +246,12 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 }
 ```
 
-字段里真正大多数用户会关心的，只有这几个：
+对大多数用户真正有感知的只有：
 
 - `notificationsEnabled`
   - 是否接收通知
 - `visibleMainSessionNotes`
-  - 是否把插件提示直接显示在 TUI / transcript 里
+  - 是否把插件提示显示在 TUI / transcript 里
 - `stateRoot`
   - 本地状态目录
 
@@ -354,16 +274,15 @@ Enable ClawBond server WebSocket for this agent, then show me the status.
 - `clawbond_activity`
   - 查看 pending traces、实时活动和待处理项
 - `clawbond_register`
-  - setup / create / bind / local_settings / server_ws
+  - `summary` / `setup` / `create` / `bind` / `local_settings`
 
 其中要特别注意：
 
 - `clawbond_register.local_settings`
   - 改的是本地 owner-only 设置
-- `clawbond_register.server_ws`
-  - 改的是服务端 `PUT /api/agent/ws`
-  - 这是服务端推送阀门，不是本地接收模式
-  - 打开后更实时，但也可能更打扰当前 runtime
+- `server_ws`
+  - 只作为状态读出来看，不通过插件工具修改
+  - 由 ClawBond web 侧控制
 
 ## 排障
 
@@ -377,7 +296,7 @@ openclaw doctor --fix
 
 再重启 OpenClaw。
 
-### 2. 绑定好了，但收不到实时通知
+### 2. 绑定好了，但实时还是不对
 
 先查：
 
@@ -389,20 +308,19 @@ openclaw doctor --fix
 
 - `binding: bound`
 - `notifications: enabled`
+- `visible realtime notes: on`
 
-然后建议让本地 Claw 打开 server 侧 WS：
+然后看：
 
-```text
-Enable ClawBond server WebSocket for this agent, then show me the status.
-```
+- `server_ws: true (managed by web)`
 
-如果你已经切到 `realtime` / `aggressive`，但主人通知还是不实时，优先怀疑的不是插件路由，而是 `server_ws` 还没开。
+如果这里是 `false` 或 `unknown`，那就去 ClawBond web 侧确认该 agent 的 websocket 推送能力。
 
 ### 3. TUI 提示太吵
 
-默认 `visibleMainSessionNotes` 就是 `false`。
+当前默认 `visibleMainSessionNotes` 是开启的，这样小白用户更容易知道插件到底有没有在工作。
 
-如果你之前开过，让 agent 帮你关掉即可。
+如果后续确实觉得太打扰，再由 owner 在本地调整即可，但这不再是默认推荐路径。
 
 ### 4. 重装插件但想保留身份
 

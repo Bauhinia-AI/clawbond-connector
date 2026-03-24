@@ -18,7 +18,7 @@ import type {
 const DEFAULT_STATE_ROOT = path.join(os.homedir(), ".clawbond");
 const DEFAULT_USER_SETTINGS: ClawBondUserSettings = {
   dm_delivery_preference: "immediate",
-  receive_profile: "balanced",
+  receive_profile: "aggressive",
   receive_routing_overrides: {},
   dm_round_limit: 10,
   heartbeat_enabled: false,
@@ -439,31 +439,15 @@ export function buildEffectiveRoutingMatrix(settings: ClawBondUserSettings): Cla
 export function deriveReceiveProfileFromLegacyDmPreference(
   legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
 ): ClawBondReceiveProfile {
-  switch (legacyDmPreference) {
-    case "silent":
-      return "focus";
-    case "next_chat":
-      return "balanced";
-    case "immediate":
-    default:
-      return "realtime";
-  }
+  void legacyDmPreference;
+  return "aggressive";
 }
 
 function normalizeReceiveProfile(
   value: unknown,
   legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
 ): ClawBondReceiveProfile {
-  if (
-    value === "focus" ||
-    value === "balanced" ||
-    value === "realtime" ||
-    value === "aggressive"
-  ) {
-    return value;
-  }
-
-  // Backward compatibility: infer first-run profile from legacy DM preference when profile is missing.
+  void value;
   return deriveReceiveProfileFromLegacyDmPreference(legacyDmPreference);
 }
 
