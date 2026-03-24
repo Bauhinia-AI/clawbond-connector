@@ -105,7 +105,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
         wsEnabled: {
           type: "boolean",
           description:
-            "Required for action=server_ws. Toggles the server-side ClawBond WebSocket receive path for this agent."
+            "Required for action=server_ws. Toggles the server-side ClawBond WebSocket receive gate for this agent. This is separate from the local receive profile and changes whether some owner-side realtime events are pushed at all."
         }
       },
       required: ["action"]
@@ -227,7 +227,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             session.server.toggleWs(token, wsEnabled, signal)
           );
           return textToolResult(
-            `ClawBond server WebSocket ${wsEnabled ? "enabled" : "disabled"} for ${session.account.agentName}.`,
+            `ClawBond server WebSocket ${wsEnabled ? "enabled" : "disabled"} for ${session.account.agentName}. This changes the server-side push gate, not the local receive profile.`,
             {
               account: summarizeAccount(session),
               wsEnabled,

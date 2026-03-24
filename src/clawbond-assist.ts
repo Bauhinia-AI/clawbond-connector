@@ -6,6 +6,7 @@ import { listAccountIds } from "./config.ts";
 import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import type {
+  ClawBondDmDeliveryPreference,
   ClawBondActivityEntry,
   ClawBondActivityEvent,
   ClawBondDeliveryPath,
@@ -72,9 +73,13 @@ export interface ClawBondAccountStatusSnapshot {
   serverUrl: string;
   socialBaseUrl: string;
   notificationsEnabled: boolean;
+  visibleMainSessionNotes: boolean;
+  dmDeliveryPreference: ClawBondDmDeliveryPreference;
   receiveProfile: ClawBondReceiveProfile;
   stateRoot: string;
 }
+
+export type ClawBondServerWsStatus = boolean | null;
 
 export interface ClawBondActivitySessionSnapshot {
   sessionKey: string;
@@ -221,9 +226,38 @@ export function getClawBondAccountStatusSnapshot(
       serverUrl: session.account.serverUrl,
       socialBaseUrl: session.account.socialBaseUrl,
       notificationsEnabled: session.account.notificationsEnabled,
+      visibleMainSessionNotes: session.account.visibleMainSessionNotes,
+      dmDeliveryPreference: settings.dm_delivery_preference,
       receiveProfile: settings.receive_profile,
       stateRoot: session.account.stateRoot
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function loadClawBondServerWsStatus(
+  cfg: OpenClawConfig,
+  accountId?: string | null,
+  signal?: AbortSignal
+): Promise<ClawBondServerWsStatus> {
+  const resolvedAccountId = resolveAssistAccountId(cfg, accountId);
+  if (!resolvedAccountId) {
+    return null;
+  }
+
+  let session: ClawBondToolSession;
+  try {
+    session = new ClawBondToolSession(cfg, resolvedAccountId);
+  } catch {
+    return null;
+  }
+
+  try {
+    const capabilities = await session.withAgentToken("clawbond_status:server_ws", (token) =>
+      session.server.getCapabilities(token, signal)
+    );
+    return readWsEnabled(capabilities.data);
   } catch {
     return null;
   }
@@ -307,6 +341,10 @@ export function buildClawBondPolicyContext(): string {
     "ClawBond plugin guidance:",
     "- For ClawBond setup, registration, binding checks, local plugin toggles, and the owner-only server WebSocket switch, prefer `clawbond_register` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
     "- Before the first ClawBond registration, ask the human what agent name they want to use. If they do not care, offer the suggested default from `clawbond_register` summary.",
+    "- Distinguish two layers: local `receive_profile` decides how inbound ClawBond items are routed after the plugin receives them; server-side `ws_enabled` decides whether some owner-side events are pushed to the plugin at all.",
+    "- Do not silently change `clawbond_register action=server_ws`. It is owner-only, it affects server-side delivery, and you should ask for explicit approval before enabling or disabling it.",
+    "- If the human says notifications are not arriving in realtime, first check binding/local notification settings, then inspect `clawbond_status action=capabilities`. If needed and approved, use `clawbond_register` with `action=server_ws` and `wsEnabled=true`.",
+    "- Explain the tradeoff clearly when discussing `server_ws`: enabling it improves realtime delivery, but it can make the local runtime more interruptive or noisy than a quieter setup.",
     "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile. Capability changes now belong to the bound human-side settings flow.",
     "- `clawbond_dm` now supports conversation pagination, history cursors, threaded replies, and `send_to_owner`. When replying inside an existing conversation, prefer `conversationId`; if replying to a specific message, also pass `replyToId`.",
     "- `clawbond_learning_reports` supports both aggregate feedback (`action=feedback`) and per-report feedback (`action=get_feedback` with a concrete `reportId`).",
@@ -775,7 +813,8 @@ function normalizeNotificationSenderType(value: unknown): ClawBondNotification["
 
 export function formatStatusSnapshotForCommand(
   snapshot: ClawBondAccountStatusSnapshot | null,
-  settings?: ClawBondUserSettings | null
+  settings?: ClawBondUserSettings | null,
+  serverWsStatus?: ClawBondServerWsStatus
 ): string {
   if (!snapshot) {
     return "ClawBond 还没有可用的已注册 agent。先运行 `/clawbond setup`，再 `/clawbond register <agentName>`，最后在网页完成绑定。";
@@ -788,11 +827,40 @@ export function formatStatusSnapshotForCommand(
     `- binding: ${snapshot.bindingStatus}`,
     `- ownerUserId: ${snapshot.ownerUserId || "(none)"}`,
     `- notifications: ${snapshot.notificationsEnabled ? "enabled" : "disabled"}`,
+    `- visible realtime notes: ${snapshot.visibleMainSessionNotes ? "on" : "off"}`,
     `- receive_profile: ${(settings ?? { receive_profile: snapshot.receiveProfile }).receive_profile}`,
+    `- dm_delivery_preference (legacy): ${snapshot.dmDeliveryPreference}`,
+    `- server_ws: ${formatServerWsStatus(serverWsStatus)}`,
     `- server: ${snapshot.serverUrl}`,
     `- social: ${snapshot.socialBaseUrl || "(not configured)"}`,
     `- stateRoot: ${snapshot.stateRoot}`
   ];
 
   return lines.join("\n");
+}
+
+function readWsEnabled(data: unknown): boolean | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  const candidate = data as Record<string, unknown>;
+  if (typeof candidate.ws_enabled === "boolean") {
+    return candidate.ws_enabled;
+  }
+  if (typeof candidate.wsEnabled === "boolean") {
+    return candidate.wsEnabled;
+  }
+
+  return null;
+}
+
+function formatServerWsStatus(value: ClawBondServerWsStatus | undefined): string {
+  if (value === true) {
+    return "true";
+  }
+  if (value === false) {
+    return "false";
+  }
+  return "unknown (could not fetch remote capabilities)";
 }

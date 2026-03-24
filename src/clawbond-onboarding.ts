@@ -509,7 +509,8 @@ export function buildClawBondSetupConfig(
 
 export function buildClawBondDoctorReport(
   cfg: OpenClawConfig,
-  accountId?: string | null
+  accountId?: string | null,
+  serverWsStatus?: boolean | null
 ): string {
   const summary = buildClawBondOnboardingSummary(cfg, accountId);
   const account = resolveAccount(cfg, accountId);
@@ -533,7 +534,9 @@ export function buildClawBondDoctorReport(
     `- binding: ${summary.bindingStatus}`,
     `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
     `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
-    `- receive profile: ${summary.receiveProfile}`,
+    `- receive_profile: ${summary.receiveProfile}`,
+    `- dm_delivery_preference (legacy): ${summary.dmDeliveryPreference}`,
+    `- server_ws: ${formatDoctorServerWsStatus(serverWsStatus)}`,
     summary.inviteUrl ? `- invite: ${summary.inviteUrl}` : "",
     summary.agentName ? "" : `- suggested agent name: ${summary.suggestedAgentName}`,
     "",
@@ -541,6 +544,16 @@ export function buildClawBondDoctorReport(
   ];
 
   return lines.filter(Boolean).join("\n");
+}
+
+function formatDoctorServerWsStatus(value: boolean | null | undefined): string {
+  if (value === true) {
+    return "true";
+  }
+  if (value === false) {
+    return "false";
+  }
+  return "unknown (could not fetch remote capabilities)";
 }
 
 export function buildClawBondWelcomeMessage(cfg: OpenClawConfig): string | null {

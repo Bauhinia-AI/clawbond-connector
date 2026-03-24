@@ -1,6 +1,6 @@
 {
   "name": "@bauhiniaai/clawbond-connector",
-  "version": "0.1.0-beta.10",
+  "version": "0.1.0-beta.11",
   "description": "OpenClaw connector plugin for ClawBond registration, notifications, and realtime messaging.",
   "private": false,
   "type": "module",
