@@ -164,6 +164,37 @@ async function main() {
       return;
     }
 
+    if (pathname === "/api/agent-actions/comments" && method === "POST") {
+      const payload = body as Record<string, unknown>;
+      assert.equal(payload.postId, "post-2");
+      assert.equal(payload.agentId, "agent-local");
+      assert.equal(typeof payload.body, "string");
+      send(201, { id: "comment-1", postId: "post-2" });
+      return;
+    }
+
+    if (pathname === "/api/agent-actions/comments/reply" && method === "POST") {
+      assert.deepEqual(body, {
+        postId: "post-2",
+        commentId: "comment-root-1",
+        body: "Reply on thread",
+        agentId: "agent-local"
+      });
+      send(201, { id: "comment-reply-1", postId: "post-2", parentCommentId: "comment-root-1" });
+      return;
+    }
+
+    if (pathname === "/api/agent-actions/comments/unread" && method === "GET") {
+      send(200, [{ postId: "post-2", unreadCount: 2 }]);
+      return;
+    }
+
+    if (pathname === "/api/agent-actions/posts/post-2/comments/unread" && method === "GET") {
+      assert.equal(url.searchParams.get("limit"), "2");
+      send(200, [{ id: "comment-root-1", postId: "post-2", body: "Need follow-up" }]);
+      return;
+    }
+
     if (pathname === "/api/agent/messages/send" && method === "POST") {
       assert.deepEqual(body, {
         to_agent_id: "peer-1",
@@ -240,6 +271,7 @@ async function main() {
   const agentProfileTool = requireTool(tools, "clawbond_agent_profile");
   const feedTool = requireTool(tools, "clawbond_get_feed");
   const createPostTool = requireTool(tools, "clawbond_create_post");
+  const commentTool = requireTool(tools, "clawbond_comment_post");
   const dmTool = requireTool(tools, "clawbond_dm");
   const activityTool = requireTool(tools, "clawbond_activity");
 
@@ -320,6 +352,40 @@ async function main() {
       postResult.content[0]?.type === "text" ? postResult.content[0].text : "",
       /Follow-up still needed: reply to peer-1 with `clawbond_dm` using conversationId `conv-1`/
     );
+
+    const commentCreateResult = await commentTool.execute("tool-3b", {
+      action: "create",
+      postId: "post-2",
+      body: "Great post",
+      commentIntent: "encouragement"
+    });
+    assert.equal(commentCreateResult.details["createdComment"]["id"], "comment-1");
+
+    const commentReplyResult = await commentTool.execute("tool-3c", {
+      action: "reply",
+      postId: "post-2",
+      commentId: "comment-root-1",
+      body: "Reply on thread"
+    });
+    assert.equal(commentReplyResult.details["reply"]["id"], "comment-reply-1");
+
+    const unreadSummaryResult = await commentTool.execute("tool-3d", {
+      action: "unread_summary"
+    });
+    assert.equal(unreadSummaryResult.details["items"][0]["unreadCount"], 2);
+
+    const unreadForPostResult = await commentTool.execute("tool-3e", {
+      action: "unread_for_post",
+      postId: "post-2",
+      limit: 2
+    });
+    assert.equal(unreadForPostResult.details["items"][0]["id"], "comment-root-1");
+
+    const legacyCommentResult = await commentTool.execute("tool-3f", {
+      postId: "post-2",
+      body: "Legacy comment payload"
+    });
+    assert.equal(legacyCommentResult.details["createdComment"]["id"], "comment-1");
 
     const dmResult = await dmTool.execute("tool-4", {
       action: "send",
@@ -478,6 +544,12 @@ async function main() {
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/me"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/feed/agent"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/posts"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments/reply"));
+    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments/unread"));
+    assert.ok(
+      seen.some((entry) => entry.pathname === "/api/agent-actions/posts/post-2/comments/unread")
+    );
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations/conv-1/messages"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/register"));

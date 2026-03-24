@@ -504,6 +504,24 @@ export class ClawBondSocialApiClient extends ClawBondApiClient {
     });
   }
 
+  public replyComment(
+    token: string,
+    payload: {
+      postId: string;
+      commentId: string;
+      body: string;
+      agentId: string;
+    },
+    signal?: AbortSignal
+  ) {
+    return this.request<Record<string, unknown>>("/api/agent-actions/comments/reply", {
+      method: "POST",
+      token,
+      signal,
+      json: payload
+    });
+  }
+
   public setLike(
     token: string,
     payload: {
@@ -555,10 +573,94 @@ export class ClawBondSocialApiClient extends ClawBondApiClient {
   }
 }
 
+export class ClawBondBenchmarkApiClient extends ClawBondApiClient {
+  public createRun(
+    token: string,
+    payload: {
+      counts?: Record<string, number>;
+    } = {},
+    signal?: AbortSignal
+  ) {
+    return this.request<Record<string, unknown>>("/api/benchmark/runs", {
+      method: "POST",
+      token,
+      signal,
+      json: payload
+    });
+  }
+
+  public getRun(token: string, runId: string, signal?: AbortSignal) {
+    return this.request<Record<string, unknown>>(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}`,
+      {
+        token,
+        signal
+      }
+    );
+  }
+
+  public listRunCases(token: string, runId: string, signal?: AbortSignal) {
+    return this.request<unknown[]>(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}/cases`,
+      {
+        token,
+        signal
+      }
+    );
+  }
+
+  public uploadArtifacts(
+    token: string,
+    runId: string,
+    artifacts: Array<{
+      case_id: string;
+      artifact_type: string;
+      payload: unknown;
+    }>,
+    signal?: AbortSignal
+  ) {
+    return this.request<Record<string, unknown>>(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}/artifacts`,
+      {
+        method: "POST",
+        token,
+        signal,
+        json: { artifacts }
+      }
+    );
+  }
+
+  public finalizeRun(token: string, runId: string, signal?: AbortSignal) {
+    return this.request<Record<string, unknown>>(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}/finalize`,
+      {
+        method: "POST",
+        token,
+        signal
+      }
+    );
+  }
+
+  public getLatestAgentRun(token: string, signal?: AbortSignal) {
+    return this.request<Record<string, unknown>>("/api/benchmark/agents/me/latest", {
+      token,
+      signal
+    });
+  }
+
+  public getLatestUserRun(token: string, signal?: AbortSignal) {
+    return this.request<Record<string, unknown>>("/api/benchmark/users/me/latest", {
+      token,
+      signal
+    });
+  }
+}
+
 export class ClawBondToolSession {
   public readonly account: ClawBondAccount;
   public readonly server: ClawBondServerApiClient;
   public readonly social: ClawBondSocialApiClient | null;
+  public readonly benchmark: ClawBondBenchmarkApiClient | null;
   private readonly store: CredentialStore;
   private readonly bootstrapClient: BootstrapClient;
 
@@ -576,6 +678,9 @@ export class ClawBondToolSession {
     this.social = this.account.socialBaseUrl
       ? new ClawBondSocialApiClient(this.account.socialBaseUrl)
       : null;
+    this.benchmark = this.account.benchmarkBaseUrl
+      ? new ClawBondBenchmarkApiClient(this.account.benchmarkBaseUrl)
+      : null;
   }
 
   public requireSocial(): ClawBondSocialApiClient {
@@ -586,6 +691,16 @@ export class ClawBondToolSession {
     }
 
     return this.social;
+  }
+
+  public requireBenchmark(): ClawBondBenchmarkApiClient {
+    if (!this.benchmark) {
+      throw new ToolInputError(
+        "ClawBond benchmarkBaseUrl is not configured. Add channels.clawbond.benchmarkBaseUrl to enable benchmark tools."
+      );
+    }
+
+    return this.benchmark;
   }
 
   public requireAgentId(): string {

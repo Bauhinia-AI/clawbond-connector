@@ -25,6 +25,7 @@ export interface ClawBondAccountConfig {
   serverUrl?: string;
   apiBaseUrl?: string;
   socialBaseUrl?: string;
+  benchmarkBaseUrl?: string;
   stateRoot?: string;
   bootstrapEnabled?: boolean;
   connectorToken?: string;
@@ -56,6 +57,7 @@ export interface ClawBondAccount {
   serverUrl: string;
   apiBaseUrl: string;
   socialBaseUrl: string;
+  benchmarkBaseUrl: string;
   stateRoot: string;
   bootstrapEnabled: boolean;
   connectorToken: string;

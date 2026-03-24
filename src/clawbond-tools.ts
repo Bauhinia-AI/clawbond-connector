@@ -58,6 +58,7 @@ export function createClawBondTools(ctx: OpenClawPluginToolContext): AnyAgentToo
     createDmTool(ctx),
     createActivityTool(ctx),
     createNotificationsTool(ctx),
+    createBenchmarkTool(ctx),
     createLearningReportsTool(ctx),
     createConnectionRequestsTool(ctx)
   ];
@@ -584,53 +585,122 @@ function createCommentTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
   return {
     name: "clawbond_comment_post",
     label: "ClawBond Comment",
-    description: "Comment on a ClawBond post through the rec-sys agent-actions API.",
+    description:
+      "Create/reply comments and inspect unread comment inbox items through rec-sys agent-actions APIs.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
+        action: {
+          type: "string",
+          description:
+            "create | reply | unread_summary | unread_for_post. Defaults to create when omitted."
+        },
         accountId: accountIdProperty,
         postId: {
           type: "string",
-          description: "Target post ID"
+          description: "Target post ID. Required for create/reply/unread_for_post."
+        },
+        commentId: {
+          type: "string",
+          description: "Target comment ID. Required for reply."
         },
         body: {
           type: "string",
-          description: "Comment body"
+          description: "Comment body. Required for create/reply."
         },
         commentIntent: {
           type: "string",
           description: "Optional comment_intent such as info_gathering, opinion, encouragement, or sharp_take"
-        }
+        },
+        limit: limitProperty
       },
-      required: ["postId", "body"]
+      required: []
     },
     execute: async (_toolCallId, rawParams, signal) => {
       ensureToolAccess(ctx, "clawbond_comment_post", "write");
+      const action = (readOptionalString(rawParams, "action") ?? "create").toLowerCase();
+      const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 20);
       const session = resolveToolSession(ctx, rawParams);
       const social = session.requireSocial();
-      const postId = readRequiredString(rawParams, "postId");
-      const body = readRequiredString(rawParams, "body");
-      const commentIntent = readOptionalString(rawParams, "commentIntent");
-      const agentId = session.requireAgentId();
+      const details = await session.withAgentToken(`clawbond_comment_post:${action}`, async (token) => {
+        switch (action) {
+          case "create": {
+            const postId = readRequiredString(rawParams, "postId");
+            const body = readRequiredString(rawParams, "body");
+            const commentIntent = readOptionalString(rawParams, "commentIntent");
+            const agentId = session.requireAgentId();
+            return {
+              action,
+              account: summarizeAccount(session),
+              createdComment: (
+                await social.createComment(
+                  token,
+                  {
+                    postId,
+                    body,
+                    agentId,
+                    comment_intent: commentIntent
+                  },
+                  signal
+                )
+              ).data
+            };
+          }
+          case "reply": {
+            const postId = readRequiredString(rawParams, "postId");
+            const commentId = readRequiredString(rawParams, "commentId");
+            const body = readRequiredString(rawParams, "body");
+            const agentId = session.requireAgentId();
+            return {
+              action,
+              account: summarizeAccount(session),
+              reply: (
+                await social.replyComment(
+                  token,
+                  {
+                    postId,
+                    commentId,
+                    body,
+                    agentId
+                  },
+                  signal
+                )
+              ).data
+            };
+          }
+          case "unread_summary":
+            return {
+              action,
+              account: summarizeAccount(session),
+              items: (await social.getUnreadCommentSummary(token, signal)).data
+            };
+          case "unread_for_post":
+            return {
+              action,
+              account: summarizeAccount(session),
+              items: (
+                await social.getUnreadCommentsForPost(
+                  token,
+                  readRequiredString(rawParams, "postId"),
+                  limit,
+                  signal
+                )
+              ).data
+            };
+          default:
+            throw new ToolInputError(`Unsupported clawbond_comment_post action: ${action}`);
+        }
+      });
 
-      const details = await session.withAgentToken("clawbond_comment_post", async (token) => ({
-        account: summarizeAccount(session),
-        createdComment: (
-          await social.createComment(
-            token,
-            {
-              postId,
-              body,
-              agentId,
-              comment_intent: commentIntent
-            },
-            signal
-          )
-        ).data
-      }));
+      const summary =
+        action === "create"
+          ? buildCompletionSummary(session, "ClawBond comment created.")
+          : action === "reply"
+            ? buildCompletionSummary(session, "ClawBond comment reply sent.")
+            : `ClawBond comment action ${action} completed.`;
 
-      return jsonToolResult(buildCompletionSummary(session, "ClawBond comment created."), details);
+      return jsonToolResult(summary, details);
     }
   };
 }
@@ -1076,6 +1146,165 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
   };
 }
 
+function createBenchmarkTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
+  return {
+    name: "clawbond_benchmark",
+    label: "ClawBond Benchmark",
+    description:
+      "Create benchmark runs, inspect cases/results, upload artifacts, and finalize official ClawBond benchmark runs.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          description: "latest | latest_user | run | cases | create_run | upload_artifacts | finalize"
+        },
+        accountId: accountIdProperty,
+        runId: {
+          type: "string",
+          description: "Required for run | cases | upload_artifacts | finalize"
+        },
+        counts: {
+          type: "object",
+          description: "Optional benchmark case counts for create_run.",
+          additionalProperties: false,
+          properties: {
+            learning_growth: {
+              type: "number",
+              description: "Optional number of learning_growth cases."
+            },
+            social_interaction: {
+              type: "number",
+              description: "Optional number of social_interaction cases."
+            },
+            safety_defense: {
+              type: "number",
+              description: "Optional number of safety_defense cases."
+            },
+            tool_usage: {
+              type: "number",
+              description: "Optional number of tool_usage cases."
+            },
+            information_retrieval: {
+              type: "number",
+              description: "Optional number of information_retrieval cases."
+            },
+            outcome_delivery: {
+              type: "number",
+              description: "Optional number of outcome_delivery cases."
+            }
+          }
+        },
+        artifacts: {
+          type: "array",
+          description: "Required for upload_artifacts. Each item: { caseId, artifactType?, payload }",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              caseId: {
+                type: "string",
+                description: "Benchmark case ID."
+              },
+              artifactType: {
+                type: "string",
+                description: "Artifact type. Defaults to submission."
+              },
+              payload: {
+                type: "object",
+                description: "Benchmark artifact payload object."
+              }
+            },
+            required: ["caseId"]
+          }
+        }
+      },
+      required: ["action"]
+    },
+    execute: async (_toolCallId, rawParams, signal) => {
+      const action = readRequiredString(rawParams, "action");
+      ensureToolAccess(
+        ctx,
+        "clawbond_benchmark",
+        isBenchmarkReadAction(action) ? "read" : "write"
+      );
+      const session = resolveToolSession(ctx, rawParams);
+      const benchmark = session.requireBenchmark();
+
+      const details = await session.withAgentToken(`clawbond_benchmark:${action}`, async (token) => {
+        switch (action) {
+          case "latest":
+            return {
+              account: summarizeAccount(session),
+              latest: (await benchmark.getLatestAgentRun(token, signal)).data
+            };
+          case "latest_user":
+            return {
+              account: summarizeAccount(session),
+              latest: (await benchmark.getLatestUserRun(token, signal)).data
+            };
+          case "run":
+            return {
+              account: summarizeAccount(session),
+              run: (
+                await benchmark.getRun(token, readRequiredString(rawParams, "runId"), signal)
+              ).data
+            };
+          case "cases":
+            return {
+              account: summarizeAccount(session),
+              cases: (
+                await benchmark.listRunCases(
+                  token,
+                  readRequiredString(rawParams, "runId"),
+                  signal
+                )
+              ).data
+            };
+          case "create_run":
+            return {
+              account: summarizeAccount(session),
+              created: (
+                await benchmark.createRun(
+                  token,
+                  normalizeBenchmarkCounts(readOptionalRecord(rawParams, "counts")),
+                  signal
+                )
+              ).data
+            };
+          case "upload_artifacts":
+            return {
+              account: summarizeAccount(session),
+              uploaded: (
+                await benchmark.uploadArtifacts(
+                  token,
+                  readRequiredString(rawParams, "runId"),
+                  readRequiredBenchmarkArtifacts(rawParams),
+                  signal
+                )
+              ).data
+            };
+          case "finalize": {
+            const runId = readRequiredString(rawParams, "runId");
+            const finalized = (await benchmark.finalizeRun(token, runId, signal)).data;
+            const latest = (await benchmark.getLatestAgentRun(token, signal)).data;
+            return {
+              account: summarizeAccount(session),
+              finalized,
+              latest
+            };
+          }
+          default:
+            throw new ToolInputError(`Unsupported clawbond_benchmark action: ${action}`);
+        }
+      });
+
+      return jsonToolResult(`ClawBond benchmark action ${action} completed.`, details);
+    }
+  };
+}
+
 function createLearningReportsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
   return {
     name: "clawbond_learning_reports",
@@ -1327,7 +1556,8 @@ function summarizeAccount(session: ClawBondToolSession) {
     agentName: session.account.agentName,
     bindingStatus: session.account.bindingStatus,
     platformBaseUrl: session.account.apiBaseUrl || session.account.serverUrl,
-    socialBaseUrl: session.account.socialBaseUrl || undefined
+    socialBaseUrl: session.account.socialBaseUrl || undefined,
+    benchmarkBaseUrl: session.account.benchmarkBaseUrl || undefined
   };
 }
 
@@ -1448,6 +1678,58 @@ function injectVisibleMainSessionNote(session: ClawBondToolSession, message: str
   }
 
   queueMainSessionVisibleNote(message, { label: "ClawBond" });
+}
+
+function isBenchmarkReadAction(action: string): boolean {
+  return action === "latest" || action === "latest_user" || action === "run" || action === "cases";
+}
+
+function normalizeBenchmarkCounts(
+  value: Record<string, unknown> | undefined
+): { counts?: Record<string, number> } {
+  if (!value) {
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+      throw new ToolInputError(`counts.${key} must be a positive number`);
+    }
+
+    counts[key] = Math.trunc(raw);
+  }
+
+  return Object.keys(counts).length > 0 ? { counts } : {};
+}
+
+function readRequiredBenchmarkArtifacts(params: Record<string, unknown>): Array<{
+  case_id: string;
+  artifact_type: string;
+  payload: unknown;
+}> {
+  const value = params.artifacts;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ToolInputError("artifacts must be a non-empty array");
+  }
+
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new ToolInputError(`artifacts[${index}] must be an object`);
+    }
+
+    const record = item as Record<string, unknown>;
+    const caseId = readRequiredString(record, "caseId", `artifacts[${index}].caseId`);
+    const artifactType =
+      readOptionalString(record, "artifactType", `artifacts[${index}].artifactType`) ??
+      "submission";
+
+    return {
+      case_id: caseId,
+      artifact_type: artifactType,
+      payload: record.payload ?? {}
+    };
+  });
 }
 
 function readStringField(value: unknown, key: string): string {

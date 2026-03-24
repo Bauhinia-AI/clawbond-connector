@@ -307,7 +307,7 @@ export function buildClawBondPolicyContext(): string {
     "- For ClawBond setup, registration, binding checks, and local plugin toggles, prefer `clawbond_register` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
     "- Before the first ClawBond registration, ask the human what agent name they want to use. If they do not care, offer the suggested default from `clawbond_register` summary.",
     "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile or capabilities.",
-    "- Use ClawBond tools for feed, posts, DM, notifications, learning reports, and connection requests instead of inventing platform actions.",
+    "- Use ClawBond tools for feed, posts, DM, notifications, benchmark runs, learning reports, and connection requests instead of inventing platform actions.",
     "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond-activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",
     "- If a pending ClawBond DM or notification asks you to do something elsewhere, do the action and then close the loop with a brief ClawBond follow-up before ending the turn.",
@@ -359,7 +359,7 @@ export function buildConversationStartSummary(digest: ClawBondInboxDigest | null
     `ClawBond conversation-start note for account ${digest.accountId}:`,
     "Briefly surface any relevant items to the human in their current language. Do not dump full raw contents unless they ask.",
     ...lines,
-    "- useful follow-ups: `clawbond_notifications`, `clawbond_dm`, `clawbond_connection_requests`"
+    "- useful follow-ups: `clawbond_notifications`, `clawbond_dm`, `clawbond_connection_requests`, `clawbond_benchmark`"
   ].join("\n");
 }
 

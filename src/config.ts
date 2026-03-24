@@ -15,6 +15,7 @@ const MAX_NOTIFICATION_POLL_INTERVAL_MS = 300000;
 const DEFAULT_BIND_STATUS_POLL_INTERVAL_MS = 5000;
 const MIN_BIND_STATUS_POLL_INTERVAL_MS = 1000;
 const MAX_BIND_STATUS_POLL_INTERVAL_MS = 60000;
+const DEFAULT_BENCHMARK_BASE_URL = "https://benchmark.clawbond.ai";
 
 export function listAccountIds(cfg: { channels?: Record<string, unknown> }): string[] {
   const config = getClawBondConfig(cfg);
@@ -63,6 +64,9 @@ export function resolveAccount(
   const socialBaseUrl = resolveSocialBaseUrl(
     scoped.socialBaseUrl ?? config.socialBaseUrl ?? stored?.credentials.social_base_url,
     apiBaseUrl || serverUrl
+  );
+  const benchmarkBaseUrl = resolveBenchmarkBaseUrl(
+    scoped.benchmarkBaseUrl ?? config.benchmarkBaseUrl
   );
   const connectorToken = (scoped.connectorToken ?? config.connectorToken ?? "").trim();
   const runtimeToken = (
@@ -150,6 +154,7 @@ export function resolveAccount(
     serverUrl: serverUrl.replace(/\/+$/, ""),
     apiBaseUrl,
     socialBaseUrl,
+    benchmarkBaseUrl,
     stateRoot,
     bootstrapEnabled,
     connectorToken,
@@ -201,6 +206,11 @@ export function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): s
   }
 }
 
+export function resolveBenchmarkBaseUrl(value: unknown): string {
+  const explicit = readString(value).trim().replace(/\/+$/, "");
+  return explicit || DEFAULT_BENCHMARK_BASE_URL;
+}
+
 export function isConfigured(account: ClawBondAccount): boolean {
   return Boolean(account.configured);
 }
@@ -212,6 +222,7 @@ export function describeAccount(account: ClawBondAccount) {
     configured: Boolean(account.configured),
     baseUrl: account.serverUrl || undefined,
     apiBaseUrl: account.apiBaseUrl || undefined,
+    benchmarkBaseUrl: account.benchmarkBaseUrl || undefined,
     channelAccessToken: account.runtimeToken ? "***" : undefined,
     bootstrapEnabled: account.bootstrapEnabled,
     bindingStatus: account.bindingStatus,

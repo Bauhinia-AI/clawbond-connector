@@ -3,6 +3,7 @@ import type {
   OpenClawPluginCommandDefinition
 } from "openclaw/plugin-sdk";
 
+import { ClawBondToolSession } from "./clawbond-api.ts";
 import {
   formatActivitySnapshotForCommand,
   formatInboxDigestForCommand,
@@ -64,6 +65,12 @@ export function createClawBondCommands(
           const snapshot = loadClawBondActivitySnapshot(liveConfig, parsed.accountId);
           return {
             text: formatActivitySnapshotForCommand(snapshot)
+          };
+        }
+
+        if (parsed.subcommand === "benchmark") {
+          return {
+            text: await runClawBondBenchmarkCommand(liveConfig, parsed.remainder)
           };
         }
 
@@ -152,6 +159,17 @@ export function createClawBondCommands(
       }
     },
     {
+      name: "clawbond-benchmark",
+      description: "Inspect ClawBond benchmark state: latest result, a specific run, or its cases.",
+      acceptsArgs: true,
+      async handler(ctx) {
+        const liveConfig = loadCommandConfig(api);
+        return {
+          text: await runClawBondBenchmarkCommand(liveConfig, normalizeCommandArg(ctx.args))
+        };
+      }
+    },
+    {
       name: "clawbond-setup",
       description: "Write a minimal local ClawBond config into openclaw.json.",
       acceptsArgs: true,
@@ -232,7 +250,8 @@ type ClawBondRootSubcommand =
   | "doctor"
   | "status"
   | "inbox"
-  | "activity";
+  | "activity"
+  | "benchmark";
 
 function parseClawBondRootArgs(
   value: string | undefined
@@ -266,7 +285,187 @@ function formatClawBondCommandHelp(): string {
     "- `/clawbond status [accountId]` - read-only account, binding, local settings / 查看账号、绑定、插件设置（只读）",
     "- `/clawbond inbox [accountId]` - unread DMs, notifications, requests / 查看未读私信、通知、请求",
     "- `/clawbond activity [accountId]` - recent realtime/plugin activity / 查看近期实时活动",
-    "- direct aliases / 直接别名: `/clawbond-setup`, `/clawbond-register`, `/clawbond-bind`, `/clawbond-doctor`, `/clawbond-status`, `/clawbond-inbox`, `/clawbond-activity`",
+    "- `/clawbond benchmark [latest|latest_user|run <runId>|cases <runId>]` - inspect benchmark state / 查看 benchmark 状态",
+    "- direct aliases / 直接别名: `/clawbond-setup`, `/clawbond-register`, `/clawbond-bind`, `/clawbond-doctor`, `/clawbond-status`, `/clawbond-inbox`, `/clawbond-activity`, `/clawbond-benchmark`",
     "- natural-language tip / 自然语言提示: 你也可以直接对 agent 说“开始接入 ClawBond”或“用这个名字注册 ClawBond”"
   ].join("\n");
+}
+
+type ClawBondBenchmarkCommandAction = "latest" | "latest_user" | "run" | "cases";
+
+function parseBenchmarkCommandArgs(value: string | null): {
+  action: ClawBondBenchmarkCommandAction;
+  runId: string | null;
+  accountId: string | null;
+} {
+  if (!value?.trim()) {
+    return { action: "latest", runId: null, accountId: null };
+  }
+
+  const parts = value.trim().split(/\s+/);
+  const action = parts[0]?.toLowerCase();
+  switch (action) {
+    case "latest":
+    case "latest_user":
+      return {
+        action,
+        runId: null,
+        accountId: parts[1]?.trim() || null
+      };
+    case "run":
+    case "cases":
+      return {
+        action,
+        runId: parts[1]?.trim() || null,
+        accountId: parts[2]?.trim() || null
+      };
+    default:
+      return {
+        action: "latest",
+        runId: null,
+        accountId: value.trim()
+      };
+  }
+}
+
+async function runClawBondBenchmarkCommand(
+  cfg: { channels?: Record<string, unknown> },
+  args: string | null
+): Promise<string> {
+  const parsed = parseBenchmarkCommandArgs(args);
+  const session = new ClawBondToolSession(cfg as never, parsed.accountId);
+  const benchmark = session.requireBenchmark();
+
+  return session.withAgentToken("clawbond_benchmark:command", async (token) => {
+    switch (parsed.action) {
+      case "latest":
+        return formatBenchmarkSummary(
+          session.account.accountId,
+          "latest",
+          (await benchmark.getLatestAgentRun(token)).data
+        );
+      case "latest_user":
+        return formatBenchmarkSummary(
+          session.account.accountId,
+          "latest_user",
+          (await benchmark.getLatestUserRun(token)).data
+        );
+      case "run":
+        return formatBenchmarkSummary(
+          session.account.accountId,
+          "run",
+          (await benchmark.getRun(token, requireBenchmarkRunId(parsed))).data
+        );
+      case "cases":
+        return formatBenchmarkCases(
+          session.account.accountId,
+          requireBenchmarkRunId(parsed),
+          (await benchmark.listRunCases(token, requireBenchmarkRunId(parsed))).data
+        );
+    }
+  });
+}
+
+function requireBenchmarkRunId(parsed: { runId: string | null }): string {
+  if (!parsed.runId) {
+    throw new Error("runId is required for this benchmark command");
+  }
+
+  return parsed.runId;
+}
+
+function formatBenchmarkSummary(
+  accountId: string,
+  action: "latest" | "latest_user" | "run",
+  raw: Record<string, unknown> | null
+): string {
+  if (!raw) {
+    return [
+      `ClawBond benchmark ${action} (${accountId})`,
+      "- status: no benchmark result found yet"
+    ].join("\n");
+  }
+
+  const runId = readTextField(raw, ["id", "run_id"]);
+  const status = readTextField(raw, ["status"]);
+  const algorithmVersion = readTextField(raw, ["algorithm_version", "algorithmVersion"]);
+  const scores = readRecordField(raw, ["scores"]);
+  const lines = [
+    `ClawBond benchmark ${action} (${accountId})`,
+    `- runId: ${runId || "(unknown)"}`,
+    `- status: ${status || "(unknown)"}`,
+    `- algorithmVersion: ${algorithmVersion || "(unknown)"}`
+  ];
+
+  if (scores && Object.keys(scores).length > 0) {
+    lines.push("- scores:");
+    for (const [key, value] of Object.entries(scores)) {
+      lines.push(`  - ${key}: ${String(value)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatBenchmarkCases(
+  accountId: string,
+  runId: string,
+  cases: unknown[]
+): string {
+  const lines = [
+    `ClawBond benchmark cases (${accountId})`,
+    `- runId: ${runId}`,
+    `- case count: ${cases.length}`
+  ];
+
+  for (const item of cases.slice(0, 10)) {
+    const record = asRecord(item);
+    lines.push(
+      `- ${readTextField(record, ["id"]) || "(unknown id)"}: ${readTextField(record, ["dimension"]) || "(unknown dimension)"}`
+    );
+  }
+
+  if (cases.length > 10) {
+    lines.push(`- more: ${cases.length - 10} additional case(s) not shown`);
+  }
+
+  return lines.join("\n");
+}
+
+function readTextField(record: Record<string, unknown>, keys: string[]): string {
+  if (!record || typeof record !== "object") {
+    return "";
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function readRecordField(record: Record<string, unknown>, keys: string[]): Record<string, unknown> | null {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  }
+
+  return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
 }
