@@ -14,11 +14,13 @@ import {
 } from "./clawbond-assist.ts";
 import {
   buildClawBondDoctorReport,
+  runClawBondLocalConfigUpdate,
   runClawBondRegisterBind,
   runClawBondRegisterCreate,
   runClawBondSetup
 } from "./clawbond-onboarding.ts";
 import { CredentialStore } from "./credential-store.ts";
+import type { ClawBondReceiveProfile } from "./types.ts";
 
 export function registerClawBondCommands(api: OpenClawPluginApi) {
   for (const command of createClawBondCommands(api)) {
@@ -107,6 +109,23 @@ export function createClawBondCommands(
         if (parsed.subcommand === "doctor") {
           return {
             text: buildClawBondDoctorReport(liveConfig, parsed.accountId)
+          };
+        }
+
+        if (isReceiveProfileSubcommand(parsed.subcommand)) {
+          if (!ctx.isAuthorizedSender) {
+            return {
+              text: "ClawBond receive mode changes are owner-only in this local runtime."
+            };
+          }
+
+          return {
+            text: await runClawBondLocalConfigUpdate({
+              cfg: liveConfig,
+              runtime: api.runtime,
+              accountId: parsed.accountId,
+              receiveProfile: parsed.subcommand
+            })
           };
         }
 
@@ -251,7 +270,8 @@ type ClawBondRootSubcommand =
   | "status"
   | "inbox"
   | "activity"
-  | "benchmark";
+  | "benchmark"
+  | ClawBondReceiveProfile;
 
 function parseClawBondRootArgs(
   value: string | undefined
@@ -281,14 +301,26 @@ function formatClawBondCommandHelp(): string {
     "- `/clawbond setup [agentName]` - write the recommended local config automatically / 自动写入推荐本地配置",
     "- `/clawbond register <agentName>` - create the ClawBond agent explicitly / 显式注册 ClawBond agent",
     "- `/clawbond bind [accountId]` - re-check browser binding and refresh local credentials / 重新检查网页绑定并刷新本地凭证",
+    "- `/clawbond focus|balanced|realtime|aggressive [accountId]` - switch local receive mode / 切换本地接收模式",
     "- `/clawbond doctor [accountId]` - inspect install, binding, and next step / 检查安装、绑定和下一步",
     "- `/clawbond status [accountId]` - read-only account, binding, local settings / 查看账号、绑定、插件设置（只读）",
     "- `/clawbond inbox [accountId]` - unread DMs, notifications, requests / 查看未读私信、通知、请求",
     "- `/clawbond activity [accountId]` - recent realtime/plugin activity / 查看近期实时活动",
     "- `/clawbond benchmark [latest|latest_user|run <runId>|cases <runId>]` - inspect benchmark state / 查看 benchmark 状态",
+    "- receive mode quick picks / 接收模式速记:",
+    "  `focus` = quieter, `balanced` = default, `realtime` = faster, `aggressive` = everything immediate",
     "- direct aliases / 直接别名: `/clawbond-setup`, `/clawbond-register`, `/clawbond-bind`, `/clawbond-doctor`, `/clawbond-status`, `/clawbond-inbox`, `/clawbond-activity`, `/clawbond-benchmark`",
     "- natural-language tip / 自然语言提示: 你也可以直接对 agent 说“开始接入 ClawBond”或“用这个名字注册 ClawBond”"
   ].join("\n");
+}
+
+function isReceiveProfileSubcommand(value: string | null): value is ClawBondReceiveProfile {
+  return (
+    value === "focus" ||
+    value === "balanced" ||
+    value === "realtime" ||
+    value === "aggressive"
+  );
 }
 
 type ClawBondBenchmarkCommandAction = "latest" | "latest_user" | "run" | "cases";

@@ -19,6 +19,7 @@ import { sanitizeLogString, sanitizeLogValue } from "./log-sanitizer.ts";
 import { clearClawBondMainWakeQueue, enqueueClawBondMainWake } from "./main-wake-store.ts";
 import { resolveStructuredIncomingPrompt } from "./message-envelope.ts";
 import { getClawBondRuntime } from "./runtime.ts";
+import { resolveInboundReceiveRouting } from "./receive-routing.ts";
 import { NotificationClient } from "./notification-client.ts";
 import {
   queueMainSessionChatSend,
@@ -33,6 +34,8 @@ import type {
   ClawBondAgentSelfProfile,
   ClawBondBindingStatus,
   ClawBondInvokeMessage,
+  ClawBondReceiveEventCategory,
+  ClawBondReceiveMode,
   ClawBondStoredCredentials
 } from "./types.ts";
 
@@ -45,7 +48,7 @@ const DM_MERGED_WAKE_COOLDOWN_MS = 90_000;
 
 const runtimeClients = new Map<string, PlatformClient>();
 const pendingMainWakeTimers = new Map<string, NodeJS.Timeout>();
-const pendingMainWakeItemIds = new Map<string, Set<string>>();
+const pendingMainWakeEntries = new Map<string, Map<string, ClawBondReceiveMode>>();
 type StartAccountContext = ChannelGatewayContext<ClawBondAccount>;
 type ClawBondStatusSnapshot = ChannelAccountSnapshot & {
   agentId?: string;
@@ -865,14 +868,58 @@ async function dispatchPlatformInvoke(
   const peerLabel = await resolveDisplayPeerLabel(message, resolvePeerLabel);
   const peer = describeActivityPeer(message, peerLabel);
   const sessionKey = MAIN_SESSION_KEY;
+  const settings = new CredentialStore(account.stateRoot).loadUserSettingsSync(account.accountId);
+  const receiveRouting = resolveInboundReceiveRouting(account, settings, message);
   const inboxStore = new ClawBondInboxStore(account.stateRoot);
   const sourceKind = message.sourceKind || "message";
   const deliveryPath = resolveDeliveryPath(message);
   const traceId = buildPendingTraceId(message);
+
+  await recordClawBondActivity(ctx, account, {
+    agentId: account.agentId,
+    sessionKey,
+    traceId,
+    requestId: message.requestId,
+    conversationId: message.conversationId,
+    peerId: peer.peerId,
+    peerLabel: peer.peerLabel,
+    deliveryPath,
+    sourceKind,
+    event: "inbound_received",
+    summary: `Received ${describeSourceKind(message)} from ${peer.peerLabel} (${receiveRouting.category} -> ${receiveRouting.mode})`,
+    preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
+  });
+
+  if (receiveRouting.mode === "mute") {
+    await recordClawBondActivity(ctx, account, {
+      agentId: account.agentId,
+      sessionKey,
+      traceId,
+      requestId: message.requestId,
+      conversationId: message.conversationId,
+      peerId: peer.peerId,
+      peerLabel: peer.peerLabel,
+      deliveryPath,
+      sourceKind,
+      event: "main_delivery_skipped",
+      summary: `Muted ${describeSourceKind(message)} from ${peer.peerLabel} by receive routing`,
+      preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
+    });
+
+    setAccountStatus(ctx, account, {
+      connected: true,
+      lastInboundAt: Date.now(),
+      lastError: null
+    });
+    return;
+  }
+
   const queued = await inboxStore.enqueue(account.accountId, {
     fingerprint: buildPendingInboxFingerprint(message, traceId),
     traceId,
     sourceKind,
+    receiveCategory: receiveRouting.category,
+    receiveMode: receiveRouting.mode,
     peerId: peer.peerId,
     peerLabel: peer.peerLabel,
     summary: `Pending ${describeSourceKind(message)} from ${peer.peerLabel}`,
@@ -885,22 +932,6 @@ async function dispatchPlatformInvoke(
     requestKey: resolveRequestKey(message)
   });
   const effectiveTraceId = queued.item.traceId;
-
-  await recordClawBondActivity(ctx, account, {
-    agentId: account.agentId,
-    sessionKey,
-    itemId: queued.item.id,
-    traceId: effectiveTraceId,
-    requestId: message.requestId,
-    conversationId: message.conversationId,
-    peerId: peer.peerId,
-    peerLabel: peer.peerLabel,
-    deliveryPath,
-    sourceKind,
-    event: "inbound_received",
-    summary: `Received ${describeSourceKind(message)} from ${peer.peerLabel}`,
-    preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
-  });
 
   if (queued.created || queued.merged) {
     await recordClawBondActivity(ctx, account, {
@@ -916,23 +947,39 @@ async function dispatchPlatformInvoke(
       sourceKind,
       event: "main_inbox_queued",
       summary: queued.merged
-        ? `Merged ${describeSourceKind(message)} from ${peer.peerLabel} into existing pending main-session item`
-        : `Queued ${describeSourceKind(message)} from ${peer.peerLabel} for main-session handling`,
+        ? `Merged ${describeSourceKind(message)} from ${peer.peerLabel} into existing pending item (${receiveRouting.category} -> ${receiveRouting.mode})`
+        : receiveRouting.mode === "queue"
+          ? `Queued ${describeSourceKind(message)} from ${peer.peerLabel} for later handling (${receiveRouting.category} -> queue)`
+          : `Queued ${describeSourceKind(message)} from ${peer.peerLabel} for immediate handling (${receiveRouting.category} -> ${receiveRouting.mode})`,
       preview: truncateActivityPreview(message.rawPrompt ?? message.prompt)
     });
 
-    const skipDmWakeByCooldown = shouldSkipMergedDmWakeByCooldown(queued, sourceKind);
-    if (skipDmWakeByCooldown) {
-      logInfo(ctx, "[clawbond-connector] skipped merged DM wake due to cooldown", {
+    if (receiveRouting.mode === "queue") {
+      logInfo(ctx, "[clawbond-connector] queued pending inbox item without immediate wake", {
         accountId: account.accountId,
         itemId: queued.item.id,
-        peerId: queued.item.peerId,
-        conversationId: queued.item.conversationId,
-        wakeRequestedAt: queued.item.wakeRequestedAt,
-        wakeCount: queued.item.wakeCount
+        receiveCategory: receiveRouting.category
       });
     } else {
-      scheduleMainSessionWake(ctx, account, [queued.item.id]);
+      const skipDmWakeByCooldown = shouldSkipMergedDmWakeByCooldown(
+        queued,
+        sourceKind,
+        receiveRouting.category
+      );
+      if (skipDmWakeByCooldown) {
+        logInfo(ctx, "[clawbond-connector] skipped merged DM wake due to cooldown", {
+          accountId: account.accountId,
+          itemId: queued.item.id,
+          peerId: queued.item.peerId,
+          conversationId: queued.item.conversationId,
+          wakeRequestedAt: queued.item.wakeRequestedAt,
+          wakeCount: queued.item.wakeCount
+        });
+      } else {
+        scheduleMainSessionWake(ctx, account, [
+          { itemId: queued.item.id, mode: receiveRouting.mode }
+        ]);
+      }
     }
   } else {
     logInfo(ctx, "[clawbond-connector] skipped duplicate pending inbox item", {
@@ -952,9 +999,10 @@ async function dispatchPlatformInvoke(
 
 function shouldSkipMergedDmWakeByCooldown(
   queued: { created: boolean; merged: boolean; item: { wakeRequestedAt: string | null; wakeCount: number } },
-  sourceKind: ClawBondInvokeMessage["sourceKind"]
+  sourceKind: ClawBondInvokeMessage["sourceKind"],
+  receiveCategory: ClawBondReceiveEventCategory
 ): boolean {
-  if (sourceKind !== "message" || !queued.merged) {
+  if (sourceKind !== "message" || receiveCategory !== "remote_agent_dm" || !queued.merged) {
     return false;
   }
 
@@ -1030,18 +1078,18 @@ function resolveRequestKey(message: ClawBondInvokeMessage): string {
 function scheduleMainSessionWake(
   ctx: StartAccountContext,
   account: ClawBondAccount,
-  itemIds: string[]
+  entries: Array<{ itemId: string; mode: ClawBondReceiveMode }>
 ) {
   const accountId = account.accountId;
-  let pendingIds = pendingMainWakeItemIds.get(accountId);
-  if (!pendingIds) {
-    pendingIds = new Set<string>();
-    pendingMainWakeItemIds.set(accountId, pendingIds);
+  let pendingEntriesForAccount = pendingMainWakeEntries.get(accountId);
+  if (!pendingEntriesForAccount) {
+    pendingEntriesForAccount = new Map<string, ClawBondReceiveMode>();
+    pendingMainWakeEntries.set(accountId, pendingEntriesForAccount);
   }
 
-  for (const itemId of itemIds) {
+  for (const { itemId, mode } of entries) {
     if (itemId.trim()) {
-      pendingIds.add(itemId.trim());
+      pendingEntriesForAccount.set(itemId.trim(), mode);
     }
   }
 
@@ -1054,9 +1102,10 @@ function scheduleMainSessionWake(
     accountId,
     setTimeout(() => {
       pendingMainWakeTimers.delete(accountId);
-      const nextPendingIds = Array.from(pendingMainWakeItemIds.get(accountId) ?? []);
-      pendingMainWakeItemIds.delete(accountId);
-      void triggerMainSessionWake(ctx, account, nextPendingIds);
+      const nextPendingEntries = Array.from(pendingMainWakeEntries.get(accountId)?.entries() ?? [])
+        .map(([itemId, mode]) => ({ itemId, mode }));
+      pendingMainWakeEntries.delete(accountId);
+      void triggerMainSessionWake(ctx, account, nextPendingEntries);
     }, MAIN_WAKE_DEBOUNCE_MS)
   );
 }
@@ -1067,19 +1116,20 @@ function clearScheduledMainSessionWork(accountId: string) {
     clearTimeout(wakeTimer);
     pendingMainWakeTimers.delete(accountId);
   }
-  pendingMainWakeItemIds.delete(accountId);
+  pendingMainWakeEntries.delete(accountId);
   clearClawBondMainWakeQueue(accountId);
 }
 
 async function triggerMainSessionWake(
   ctx: StartAccountContext,
   account: ClawBondAccount,
-  itemIds: string[]
+  entries: Array<{ itemId: string; mode: ClawBondReceiveMode }>
 ) {
-  if (itemIds.length === 0) {
+  if (entries.length === 0) {
     return;
   }
 
+  const itemIds = entries.map((entry) => entry.itemId);
   const inboxStore = new ClawBondInboxStore(account.stateRoot);
   await inboxStore.markWakeRequested(account.accountId, itemIds);
   const wakeItems = inboxStore.listPendingByIdsSync(account.accountId, itemIds);
@@ -1088,13 +1138,13 @@ async function triggerMainSessionWake(
     return;
   }
 
-  enqueueClawBondMainWake(
-    account.accountId,
-    wakeItems.map((item) => item.id)
-  );
+  const modeByItemId = new Map(entries.map((entry) => [entry.itemId, entry.mode] as const));
+  const injectItems = wakeItems.filter((item) => modeByItemId.get(item.id) === "inject_main");
+  const wakeOnlyItems = wakeItems.filter((item) => modeByItemId.get(item.id) === "wake_only");
+  const visibleItems = [...injectItems, ...wakeOnlyItems];
 
-  if (account.visibleMainSessionNotes) {
-    queueMainSessionVisibleNote(buildMainWakeVisibleNote(wakeItems), {
+  if (account.visibleMainSessionNotes && visibleItems.length > 0) {
+    queueMainSessionVisibleNote(buildMainWakeVisibleNote(visibleItems), {
       label: "ClawBond",
       onError: (error) => {
         logWarn(ctx, "[clawbond-connector] failed to inject main-session processing note", {
@@ -1104,35 +1154,40 @@ async function triggerMainSessionWake(
     });
   }
 
-  const dmItems = wakeItems.filter((item) => item.sourceKind === "message");
-  const nonDmItems = wakeItems.filter((item) => item.sourceKind !== "message");
-
-  if (dmItems.length > 0) {
-    const chatSendText = buildMainRealtimeChatSendText(dmItems);
+  if (injectItems.length > 0) {
+    enqueueClawBondMainWake(
+      account.accountId,
+      injectItems.map((item) => item.id)
+    );
+    const chatSendText = buildMainRealtimeChatSendText(injectItems);
     queueMainSessionChatSend(chatSendText, {
       onError: (error) => {
-        void recordMainWakeActivity(ctx, account, dmItems, "main_run_failed", {
-          summary: "Failed to send direct main-session ClawBond DM handoff",
+        void recordMainWakeActivity(ctx, account, injectItems, "main_run_failed", {
+          summary: "Failed to send direct main-session ClawBond handoff",
           error: stringifyError(error)
         });
-        logWarn(ctx, "[clawbond-connector] failed to send direct main-session DM handoff", {
+        logWarn(ctx, "[clawbond-connector] failed to send direct main-session ClawBond handoff", {
           error: stringifyError(error)
         });
       }
     });
 
-    await recordMainWakeActivity(ctx, account, dmItems, "main_run_requested", {
-      summary: "Queued direct main-session ClawBond DM handoff",
+    await recordMainWakeActivity(ctx, account, injectItems, "main_run_requested", {
+      summary: "Queued direct main-session ClawBond handoff",
       preview: truncateActivityPreview(chatSendText)
     });
   }
 
-  if (nonDmItems.length > 0) {
-    const wakeEventText = buildMainRealtimeWakeEventText(nonDmItems);
+  if (wakeOnlyItems.length > 0) {
+    enqueueClawBondMainWake(
+      account.accountId,
+      wakeOnlyItems.map((item) => item.id)
+    );
+    const wakeEventText = buildMainRealtimeWakeEventText(wakeOnlyItems);
 
     queueMainSessionWakeEvent(wakeEventText, {
       onError: (error) => {
-        void recordMainWakeActivity(ctx, account, nonDmItems, "main_run_failed", {
+        void recordMainWakeActivity(ctx, account, wakeOnlyItems, "main_run_failed", {
           summary: "Failed to request immediate main-session ClawBond wake",
           error: stringifyError(error)
         });
@@ -1142,7 +1197,7 @@ async function triggerMainSessionWake(
       }
     });
 
-    await recordMainWakeActivity(ctx, account, nonDmItems, "main_run_requested", {
+    await recordMainWakeActivity(ctx, account, wakeOnlyItems, "main_run_requested", {
       summary: "Queued immediate main-session ClawBond wake",
       preview: truncateActivityPreview(wakeEventText)
     });
@@ -1730,6 +1785,8 @@ function buildInvokeMessageFromPolledDm(
       message.conversationId || buildPolledConversationId(account.agentId, message.senderId),
     timestamp: message.createdAt,
     sourceAgentId: message.senderId,
+    senderId: message.senderId,
+    senderType: message.senderType,
     sourceKind: "message",
     prompt: incoming.prompt,
     rawPrompt: message.content,

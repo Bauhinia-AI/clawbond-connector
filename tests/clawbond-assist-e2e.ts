@@ -238,6 +238,10 @@ async function main() {
     assert.match(rootHelpResult?.text ?? "", /\/clawbond setup/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond register/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond bind/);
+    assert.match(
+      rootHelpResult?.text ?? "",
+      /\/clawbond focus\|balanced\|realtime\|aggressive/
+    );
     assert.match(rootHelpResult?.text ?? "", /\/clawbond doctor/);
     assert.match(rootHelpResult?.text ?? "", /\/clawbond status/);
 
@@ -259,6 +263,20 @@ async function main() {
     } as never);
     assert.match(rootDoctorResult?.text ?? "", /ClawBond doctor/);
     assert.match(rootDoctorResult?.text ?? "", /binding: bound/);
+    assert.match(rootDoctorResult?.text ?? "", /receive profile: balanced/);
+
+    const rootRealtimeResult = await rootCommand?.handler({
+      channel: "web",
+      isAuthorizedSender: true,
+      commandBody: "/clawbond realtime",
+      args: "realtime",
+      config: cfg
+    } as never);
+    assert.match(rootRealtimeResult?.text ?? "", /ClawBond local settings updated/);
+    assert.match(
+      rootRealtimeResult?.text ?? "",
+      /receive profile: pending \(realtime; available after agent registration\)/
+    );
 
     const directDoctorResult = await doctorCommand?.handler({
       channel: "web",
@@ -341,7 +359,7 @@ async function main() {
       config: cfg
     } as never);
     assert.match(statusResult?.text ?? "", /binding: bound/);
-    assert.match(statusResult?.text ?? "", /dm_delivery_preference: immediate/);
+    assert.match(statusResult?.text ?? "", /receive_profile: balanced/);
 
     const inboxResult = await inboxCommand?.handler({
       channel: "web",

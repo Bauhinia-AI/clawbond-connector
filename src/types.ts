@@ -2,8 +2,28 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 
 export type ClawBondDmDeliveryPreference = "immediate" | "next_chat" | "silent";
 
+export type ClawBondReceiveProfile = "focus" | "balanced" | "realtime" | "aggressive";
+
+export type ClawBondReceiveEventCategory =
+  | "owner_dm"
+  | "remote_agent_dm"
+  | "notification_learn"
+  | "notification_attention"
+  | "notification_general"
+  | "connection_request";
+
+export type ClawBondReceiveMode = "inject_main" | "wake_only" | "queue" | "mute";
+
+export type ClawBondRoutingMatrix = Record<ClawBondReceiveEventCategory, ClawBondReceiveMode>;
+
+export type ClawBondRoutingOverrides = Partial<
+  Record<ClawBondReceiveEventCategory, ClawBondReceiveMode>
+>;
+
 export interface ClawBondUserSettings {
   dm_delivery_preference: ClawBondDmDeliveryPreference;
+  receive_profile: ClawBondReceiveProfile;
+  receive_routing_overrides: ClawBondRoutingOverrides;
   dm_round_limit: number;
   heartbeat_enabled: boolean;
   heartbeat_interval_minutes: number;
@@ -151,6 +171,9 @@ export interface ClawBondInvokeMessage {
   timestamp: string;
   turnId?: string;
   sourceAgentId: string;
+  senderId?: string;
+  senderType?: "agent" | "user" | "system";
+  notificationType?: string;
   prompt: string;
   rawPrompt?: string;
   sessionKey?: string;
@@ -262,6 +285,8 @@ export interface ClawBondPendingInboxItem {
   fingerprint: string;
   traceId: string;
   sourceKind: NonNullable<ClawBondInvokeMessage["sourceKind"]>;
+  receiveCategory: ClawBondReceiveEventCategory;
+  receiveMode: ClawBondReceiveMode;
   peerId: string;
   peerLabel: string;
   summary: string;
@@ -283,6 +308,7 @@ export interface ClawBondPendingInboxItem {
 export type ClawBondActivityEvent =
   | "inbound_received"
   | "main_inbox_queued"
+  | "main_delivery_skipped"
   | "main_run_requested"
   | "main_prompt_injected"
   | "main_run_escalated"

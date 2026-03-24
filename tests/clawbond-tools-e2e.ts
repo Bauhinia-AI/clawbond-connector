@@ -414,21 +414,29 @@ async function main() {
     });
     assert.equal(registerSummary.details["phase"], "ready");
     assert.equal(registerSummary.details["visibleMainSessionNotes"], true);
+    assert.equal(registerSummary.details["receiveProfile"], "balanced");
 
     const onboardingUpdate = await registerTool.execute("tool-0b", {
       action: "local_settings",
       notificationsEnabled: false,
-      visibleMainSessionNotes: false
+      visibleMainSessionNotes: false,
+      receiveProfile: "focus"
     });
     assert.match(
       onboardingUpdate.content[0]?.type === "text" ? onboardingUpdate.content[0].text : "",
       /ClawBond local settings updated/
+    );
+    assert.match(
+      onboardingUpdate.content[0]?.type === "text" ? onboardingUpdate.content[0].text : "",
+      /receive profile: pending \(focus; available after agent registration\)/
     );
     const runtimeChannel = (
       runtimeConfig["channels"] as Record<string, unknown>
     )["clawbond"] as Record<string, unknown>;
     assert.equal(runtimeChannel["notificationsEnabled"], false);
     assert.equal(runtimeChannel["visibleMainSessionNotes"], false);
+    const postUpdateSettings = new CredentialStore(stateRoot).loadUserSettingsSync("default");
+    assert.equal(postUpdateSettings.receive_profile, "balanced");
 
     const serverWsUpdate = await registerTool.execute("tool-0c", {
       action: "server_ws",

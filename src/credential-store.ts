@@ -4,6 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  ClawBondReceiveEventCategory,
+  ClawBondReceiveMode,
+  ClawBondReceiveProfile,
+  ClawBondRoutingMatrix,
+  ClawBondRoutingOverrides,
   ClawBondStoredAgent,
   ClawBondStoredCredentials,
   ClawBondSyncState,
@@ -13,6 +18,8 @@ import type {
 const DEFAULT_STATE_ROOT = path.join(os.homedir(), ".clawbond");
 const DEFAULT_USER_SETTINGS: ClawBondUserSettings = {
   dm_delivery_preference: "immediate",
+  receive_profile: "balanced",
+  receive_routing_overrides: {},
   dm_round_limit: 10,
   heartbeat_enabled: false,
   heartbeat_interval_minutes: 10,
@@ -26,6 +33,52 @@ const DEFAULT_USER_SETTINGS: ClawBondUserSettings = {
 const DEFAULT_SYNC_STATE: ClawBondSyncState = {
   last_seen_dm_cursor: null,
   heartbeat_last_run_at: null
+};
+
+const RECEIVE_EVENT_CATEGORIES: ClawBondReceiveEventCategory[] = [
+  "owner_dm",
+  "remote_agent_dm",
+  "notification_learn",
+  "notification_attention",
+  "notification_general",
+  "connection_request"
+];
+
+const RECEIVE_MODES: ClawBondReceiveMode[] = ["inject_main", "wake_only", "queue", "mute"];
+
+const PROFILE_ROUTING_MATRIX: Record<ClawBondReceiveProfile, ClawBondRoutingMatrix> = {
+  focus: {
+    owner_dm: "inject_main",
+    remote_agent_dm: "queue",
+    notification_learn: "queue",
+    notification_attention: "wake_only",
+    notification_general: "mute",
+    connection_request: "queue"
+  },
+  balanced: {
+    owner_dm: "inject_main",
+    remote_agent_dm: "wake_only",
+    notification_learn: "wake_only",
+    notification_attention: "inject_main",
+    notification_general: "wake_only",
+    connection_request: "wake_only"
+  },
+  realtime: {
+    owner_dm: "inject_main",
+    remote_agent_dm: "inject_main",
+    notification_learn: "inject_main",
+    notification_attention: "inject_main",
+    notification_general: "wake_only",
+    connection_request: "inject_main"
+  },
+  aggressive: {
+    owner_dm: "inject_main",
+    remote_agent_dm: "inject_main",
+    notification_learn: "inject_main",
+    notification_attention: "inject_main",
+    notification_general: "inject_main",
+    connection_request: "inject_main"
+  }
 };
 
 export class CredentialStore {
@@ -306,14 +359,21 @@ export function normalizeUserSettings(value: unknown): ClawBondUserSettings {
 
   const candidate = value as Record<string, unknown>;
   const dmDeliveryPreference = candidate.dm_delivery_preference;
+  const normalizedDmDeliveryPreference =
+    dmDeliveryPreference === "immediate" ||
+    dmDeliveryPreference === "next_chat" ||
+    dmDeliveryPreference === "silent"
+      ? dmDeliveryPreference
+      : defaults.dm_delivery_preference;
+  const receiveProfile = normalizeReceiveProfile(
+    candidate.receive_profile,
+    normalizedDmDeliveryPreference
+  );
 
   return {
-    dm_delivery_preference:
-      dmDeliveryPreference === "immediate" ||
-      dmDeliveryPreference === "next_chat" ||
-      dmDeliveryPreference === "silent"
-        ? dmDeliveryPreference
-        : defaults.dm_delivery_preference,
+    dm_delivery_preference: normalizedDmDeliveryPreference,
+    receive_profile: receiveProfile,
+    receive_routing_overrides: normalizeRoutingOverrides(candidate.receive_routing_overrides),
     dm_round_limit: normalizePositiveInteger(candidate.dm_round_limit, defaults.dm_round_limit),
     heartbeat_enabled:
       typeof candidate.heartbeat_enabled === "boolean"
@@ -362,6 +422,71 @@ function normalizeDirectionWeights(value: unknown): ClawBondUserSettings["heartb
       defaults.social_exploration
     )
   };
+}
+
+export function buildRoutingMatrixForProfile(profile: ClawBondReceiveProfile): ClawBondRoutingMatrix {
+  const matrix = PROFILE_ROUTING_MATRIX[profile] ?? PROFILE_ROUTING_MATRIX.balanced;
+  return { ...matrix };
+}
+
+export function buildEffectiveRoutingMatrix(settings: ClawBondUserSettings): ClawBondRoutingMatrix {
+  return {
+    ...buildRoutingMatrixForProfile(settings.receive_profile),
+    ...settings.receive_routing_overrides
+  };
+}
+
+export function deriveReceiveProfileFromLegacyDmPreference(
+  legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
+): ClawBondReceiveProfile {
+  switch (legacyDmPreference) {
+    case "silent":
+      return "focus";
+    case "next_chat":
+      return "balanced";
+    case "immediate":
+    default:
+      return "realtime";
+  }
+}
+
+function normalizeReceiveProfile(
+  value: unknown,
+  legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
+): ClawBondReceiveProfile {
+  if (
+    value === "focus" ||
+    value === "balanced" ||
+    value === "realtime" ||
+    value === "aggressive"
+  ) {
+    return value;
+  }
+
+  // Backward compatibility: infer first-run profile from legacy DM preference when profile is missing.
+  return deriveReceiveProfileFromLegacyDmPreference(legacyDmPreference);
+}
+
+function normalizeRoutingOverrides(value: unknown): ClawBondRoutingOverrides {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const normalized: ClawBondRoutingOverrides = {};
+
+  for (const category of RECEIVE_EVENT_CATEGORIES) {
+    const mode = candidate[category];
+    if (typeof mode === "string" && isReceiveMode(mode)) {
+      normalized[category] = mode;
+    }
+  }
+
+  return normalized;
+}
+
+function isReceiveMode(value: string): value is ClawBondReceiveMode {
+  return RECEIVE_MODES.includes(value as ClawBondReceiveMode);
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {

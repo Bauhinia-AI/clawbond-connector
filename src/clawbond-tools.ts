@@ -18,6 +18,7 @@ import { queueMainSessionVisibleNote } from "./openclaw-cli.ts";
 import { getClawBondRuntime } from "./runtime.ts";
 import type {
   ClawBondDmDeliveryPreference,
+  ClawBondReceiveProfile,
   ClawBondPendingInboxItem
 } from "./types.ts";
 import {
@@ -96,6 +97,11 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           type: "string",
           description: "Optional DM handling preference: immediate | next_chat | silent"
         },
+        receiveProfile: {
+          type: "string",
+          description:
+            "Optional inbound receive profile: focus | balanced | realtime | aggressive"
+        },
         wsEnabled: {
           type: "boolean",
           description:
@@ -121,7 +127,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             `- binding: ${summary.bindingStatus}`,
             `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
             `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
-            `- dm delivery preference: ${summary.dmDeliveryPreference}`,
+            `- receive profile: ${summary.receiveProfile}`,
             `- next: ${summary.nextStep}`
           ];
           if (summary.inviteUrl) {
@@ -191,6 +197,8 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           }
           const dmDeliveryPreference =
             (dmDeliveryPreferenceRaw as ClawBondDmDeliveryPreference | undefined) ?? null;
+          const receiveProfileRaw = readOptionalString(rawParams, "receiveProfile");
+          const receiveProfile = normalizeReceiveProfileInput(receiveProfileRaw);
 
           const text = await runClawBondLocalConfigUpdate({
             cfg: ctx.config,
@@ -198,7 +206,8 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             accountId,
             notificationsEnabled: readOptionalBoolean(rawParams, "notificationsEnabled"),
             visibleMainSessionNotes: readOptionalBoolean(rawParams, "visibleMainSessionNotes"),
-            dmDeliveryPreference
+            dmDeliveryPreference,
+            receiveProfile
           });
           const summary = buildClawBondOnboardingSummary(
             runtime.config?.loadConfig?.() ?? ctx.config,
@@ -1695,6 +1704,18 @@ function resolveToolSession(
     ctx.config,
     readOptionalString(params, "accountId") ?? ctx.agentAccountId
   );
+}
+
+function normalizeReceiveProfileInput(value: string | undefined): ClawBondReceiveProfile | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value === "focus" || value === "balanced" || value === "realtime" || value === "aggressive") {
+    return value;
+  }
+
+  throw new ToolInputError("receiveProfile must be focus, balanced, realtime, or aggressive");
 }
 
 function summarizeAccount(session: ClawBondToolSession) {

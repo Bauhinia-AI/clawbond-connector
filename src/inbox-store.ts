@@ -8,7 +8,9 @@ import type {
   ClawBondDeliveryPath,
   ClawBondInboxHandledBy,
   ClawBondPendingInboxItem,
-  ClawBondPendingInboxItemStatus
+  ClawBondPendingInboxItemStatus,
+  ClawBondReceiveEventCategory,
+  ClawBondReceiveMode
 } from "./types.ts";
 
 const INBOX_DIRNAME = "inbox";
@@ -20,6 +22,8 @@ export interface EnqueueInboxItemInput {
   fingerprint: string;
   traceId?: string;
   sourceKind: ClawBondPendingInboxItem["sourceKind"];
+  receiveCategory?: ClawBondReceiveEventCategory;
+  receiveMode?: ClawBondReceiveMode;
   peerId: string;
   peerLabel: string;
   summary: string;
@@ -98,6 +102,10 @@ export class ClawBondInboxStore {
         fingerprint: input.fingerprint.trim(),
         traceId: (input.traceId?.trim() || input.fingerprint.trim()),
         sourceKind: input.sourceKind,
+        receiveCategory:
+          input.receiveCategory ?? normalizeReceiveCategory(null, input.sourceKind) ?? "remote_agent_dm",
+        receiveMode:
+          input.receiveMode ?? normalizeReceiveMode(null, input.sourceKind) ?? "inject_main",
         peerId: input.peerId.trim() || "unknown",
         peerLabel: input.peerLabel.trim() || input.peerId.trim() || "unknown",
         summary: input.summary.trim() || "ClawBond inbox item",
@@ -393,11 +401,23 @@ function normalizePendingInboxItems(value: unknown): ClawBondPendingInboxItem[] 
     const fingerprint = normalizeOptionalString(candidate.fingerprint);
     const traceId = normalizeOptionalString(candidate.traceId) || fingerprint;
     const sourceKind = normalizeSourceKind(candidate.sourceKind);
+    const receiveCategory = normalizeReceiveCategory(candidate.receiveCategory, sourceKind);
+    const receiveMode = normalizeReceiveMode(candidate.receiveMode, sourceKind);
     const peerId = normalizeOptionalString(candidate.peerId);
     const peerLabel = normalizeOptionalString(candidate.peerLabel) || peerId;
     const summary = normalizeOptionalString(candidate.summary);
     const content = normalizeOptionalString(candidate.content);
-    if (!id || !accountId || !fingerprint || !traceId || !sourceKind || !peerId || !summary) {
+    if (
+      !id ||
+      !accountId ||
+      !fingerprint ||
+      !traceId ||
+      !sourceKind ||
+      !receiveCategory ||
+      !receiveMode ||
+      !peerId ||
+      !summary
+    ) {
       return [];
     }
 
@@ -408,6 +428,8 @@ function normalizePendingInboxItems(value: unknown): ClawBondPendingInboxItem[] 
         fingerprint,
         traceId,
         sourceKind,
+        receiveCategory,
+        receiveMode,
         peerId,
         peerLabel,
         summary,
@@ -489,6 +511,8 @@ function mergePendingConversationItem(
     ...existing,
     fingerprint: input.fingerprint.trim() || existing.fingerprint,
     traceId: existing.traceId,
+    receiveCategory: input.receiveCategory ?? existing.receiveCategory,
+    receiveMode: input.receiveMode ?? existing.receiveMode,
     peerId: input.peerId.trim() || existing.peerId,
     peerLabel: input.peerLabel.trim() || existing.peerLabel,
     summary: input.summary.trim() || existing.summary,
@@ -554,6 +578,57 @@ function normalizeSourceKind(value: unknown): ClawBondPendingInboxItem["sourceKi
     value === "connection_request_response"
     ? value
     : null;
+}
+
+function normalizeReceiveCategory(
+  value: unknown,
+  sourceKind: ClawBondPendingInboxItem["sourceKind"] | null
+): ClawBondReceiveEventCategory | null {
+  if (
+    value === "owner_dm" ||
+    value === "remote_agent_dm" ||
+    value === "notification_learn" ||
+    value === "notification_attention" ||
+    value === "notification_general" ||
+    value === "connection_request"
+  ) {
+    return value;
+  }
+
+  switch (sourceKind) {
+    case "notification":
+      return "notification_general";
+    case "connection_request":
+    case "connection_request_response":
+      return "connection_request";
+    case "message":
+    default:
+      return "remote_agent_dm";
+  }
+}
+
+function normalizeReceiveMode(
+  value: unknown,
+  sourceKind: ClawBondPendingInboxItem["sourceKind"] | null
+): ClawBondReceiveMode | null {
+  if (
+    value === "inject_main" ||
+    value === "wake_only" ||
+    value === "queue" ||
+    value === "mute"
+  ) {
+    return value;
+  }
+
+  switch (sourceKind) {
+    case "notification":
+    case "connection_request":
+    case "connection_request_response":
+      return "wake_only";
+    case "message":
+    default:
+      return "inject_main";
+  }
 }
 
 function normalizeStatus(value: unknown): ClawBondPendingInboxItemStatus {

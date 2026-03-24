@@ -228,6 +228,8 @@ export class PlatformClient extends EventEmitter {
       conversationId,
       timestamp: payload.timestamp,
       sourceAgentId: payload.from_agent_id,
+      senderId: payload.from_agent_id,
+      senderType: normalizeSenderType(payload.sender_type),
       sourceKind: "message",
       prompt: incoming.prompt,
       rawPrompt: payload.content,
@@ -463,6 +465,8 @@ function normalizeConnectionRequestInvoke(
     conversationId: payload.conversation_id,
     timestamp: new Date().toISOString(),
     sourceAgentId: payload.from_agent_id,
+    senderId: payload.from_agent_id,
+    senderType: "agent",
     sourceKind: "connection_request",
     rawPrompt: message,
     prompt: [
@@ -498,6 +502,8 @@ function normalizeConnectionRequestResponseInvoke(
     conversationId: payload.conversation_id,
     timestamp: new Date().toISOString(),
     sourceAgentId: payload.from_agent_id,
+    senderId: payload.from_agent_id,
+    senderType: "agent",
     sourceKind: "connection_request_response",
     rawPrompt: message,
     prompt: [

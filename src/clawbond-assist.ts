@@ -3,15 +3,15 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondHttpError, ClawBondToolSession } from "./clawbond-api.ts";
 import { listAccountIds } from "./config.ts";
-import { CredentialStore } from "./credential-store.ts";
+import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import type {
   ClawBondActivityEntry,
   ClawBondActivityEvent,
   ClawBondDeliveryPath,
-  ClawBondDmDeliveryPreference,
   ClawBondNotification,
   ClawBondPendingInboxItem,
+  ClawBondReceiveProfile,
   ClawBondUserSettings
 } from "./types.ts";
 
@@ -52,7 +52,7 @@ export interface ClawBondInboxDigest {
   accountId: string;
   agentId: string;
   agentName: string;
-  dmDeliveryPreference: ClawBondDmDeliveryPreference;
+  receiveProfile: ClawBondReceiveProfile;
   notificationCount: number;
   notifications: ClawBondUnreadNotificationPreview[];
   dmCount: number;
@@ -72,7 +72,7 @@ export interface ClawBondAccountStatusSnapshot {
   serverUrl: string;
   socialBaseUrl: string;
   notificationsEnabled: boolean;
-  dmDeliveryPreference: ClawBondDmDeliveryPreference;
+  receiveProfile: ClawBondReceiveProfile;
   stateRoot: string;
 }
 
@@ -136,6 +136,7 @@ export async function loadClawBondInboxDigest(
   const settings = new CredentialStore(session.account.stateRoot).loadUserSettingsSync(
     session.account.accountId
   );
+  const routingMatrix = buildEffectiveRoutingMatrix(settings);
   const state = new CredentialStore(session.account.stateRoot).loadSyncStateSync(session.account.accountId);
 
   return session.withAgentToken("clawbond_inbox_digest", async (token) => {
@@ -154,7 +155,7 @@ export async function loadClawBondInboxDigest(
         : { data: [] as unknown[] };
 
     const dmResult =
-      settings.dm_delivery_preference === "silent"
+      routingMatrix.remote_agent_dm === "mute"
         ? { data: [] as unknown[], pagination: undefined }
         : await settleAssistCall(
             () => session.server.pollMessages(token, state.last_seen_dm_cursor ?? undefined, 10, signal),
@@ -178,7 +179,7 @@ export async function loadClawBondInboxDigest(
       accountId: session.account.accountId,
       agentId: session.account.agentId,
       agentName: session.account.agentName,
-      dmDeliveryPreference: settings.dm_delivery_preference,
+      receiveProfile: settings.receive_profile,
       notificationCount: notificationCount || unreadNotifications.length,
       notifications: unreadNotifications.slice(0, SUMMARY_NOTIFICATION_LIMIT).map((item) => ({
         id: item.id,
@@ -220,7 +221,7 @@ export function getClawBondAccountStatusSnapshot(
       serverUrl: session.account.serverUrl,
       socialBaseUrl: session.account.socialBaseUrl,
       notificationsEnabled: session.account.notificationsEnabled,
-      dmDeliveryPreference: settings.dm_delivery_preference,
+      receiveProfile: settings.receive_profile,
       stateRoot: session.account.stateRoot
     };
   } catch {
@@ -787,7 +788,7 @@ export function formatStatusSnapshotForCommand(
     `- binding: ${snapshot.bindingStatus}`,
     `- ownerUserId: ${snapshot.ownerUserId || "(none)"}`,
     `- notifications: ${snapshot.notificationsEnabled ? "enabled" : "disabled"}`,
-    `- dm_delivery_preference: ${(settings ?? { dm_delivery_preference: snapshot.dmDeliveryPreference }).dm_delivery_preference}`,
+    `- receive_profile: ${(settings ?? { receive_profile: snapshot.receiveProfile }).receive_profile}`,
     `- server: ${snapshot.serverUrl}`,
     `- social: ${snapshot.socialBaseUrl || "(not configured)"}`,
     `- stateRoot: ${snapshot.stateRoot}`
