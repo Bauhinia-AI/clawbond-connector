@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
 
+import * as OpenClawPluginSdk from "openclaw/plugin-sdk";
 import {
   type ChannelAccountSnapshot,
-  formatTextWithAttachmentLinks,
-  resolveOutboundMediaUrls,
   type ChannelGatewayContext,
   type ChannelPlugin,
   type OpenClawConfig
@@ -90,6 +89,70 @@ type ConnectedSessionExit =
       kind: "binding_lost";
       account: ClawBondAccount;
     };
+
+function resolveOutboundMediaUrlsCompat(payload: {
+  mediaUrls?: string[];
+  mediaUrl?: string;
+}): string[] {
+  const sdkResolver = (
+    OpenClawPluginSdk as {
+      resolveOutboundMediaUrls?: (value: { mediaUrls?: string[]; mediaUrl?: string }) => string[];
+    }
+  ).resolveOutboundMediaUrls;
+
+  if (typeof sdkResolver === "function") {
+    return sdkResolver(payload);
+  }
+
+  const urls: string[] = [];
+  for (const value of payload.mediaUrls ?? []) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      urls.push(trimmed);
+    }
+  }
+
+  if (typeof payload.mediaUrl === "string") {
+    const trimmed = payload.mediaUrl.trim();
+    if (trimmed) {
+      urls.push(trimmed);
+    }
+  }
+
+  return [...new Set(urls)];
+}
+
+function formatTextWithAttachmentLinksCompat(text: string | undefined, mediaUrls: string[]): string {
+  const sdkFormatter = (
+    OpenClawPluginSdk as {
+      formatTextWithAttachmentLinks?: (value: string | undefined, urls: string[]) => string;
+    }
+  ).formatTextWithAttachmentLinks;
+
+  if (typeof sdkFormatter === "function") {
+    return sdkFormatter(text, mediaUrls);
+  }
+
+  const trimmedText = typeof text === "string" ? text.trim() : "";
+  const trimmedUrls = mediaUrls
+    .filter((value) => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (trimmedUrls.length === 0) {
+    return trimmedText;
+  }
+
+  const attachmentBlock = trimmedUrls.join("\n");
+  if (!trimmedText) {
+    return attachmentBlock;
+  }
+
+  return `${trimmedText}\n\n${attachmentBlock}`;
+}
 
 export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
   id: CHANNEL_ID,
@@ -276,9 +339,9 @@ export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
     sendPayload: async (ctx) => {
       const account = resolveOutboundAccount(ctx.cfg, ctx.accountId);
       const client = requirePlatformClient(account.accountId);
-      const content = formatTextWithAttachmentLinks(
+      const content = formatTextWithAttachmentLinksCompat(
         ctx.payload.text,
-        resolveOutboundMediaUrls(ctx.payload)
+        resolveOutboundMediaUrlsCompat(ctx.payload)
       );
 
       if (!content) {
