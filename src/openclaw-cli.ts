@@ -6,13 +6,81 @@ import { getClawBondRuntime } from "./runtime.ts";
 
 const MAIN_SESSION_KEY = "agent:main:main";
 export const CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE = "ClawBond realtime handoff.";
+const OPENCLAW_ENTRY_BASENAMES = new Set(["openclaw", "openclaw.mjs", "openclaw.js"]);
+const OPENCLAW_ENTRY_SUFFIXES = ["/dist/entry.js", "/dist/entry.mjs"];
 
-export function resolveOpenClawCommand(): string {
+export type OpenClawSpawnTarget = {
+  command: string;
+  args: string[];
+};
+
+function resolveExplicitOpenClawCommand(explicitCommand?: string | null): string {
   return (
+    explicitCommand?.trim() ||
     process.env.CLAWBOND_OPENCLAW_BIN?.trim() ||
     process.env.OPENCLAW_BIN?.trim() ||
-    "openclaw"
+    ""
   );
+}
+
+function resolveCurrentProcessOpenClawTarget(
+  processExecPath?: string | null,
+  processArgv1?: string | null
+): OpenClawSpawnTarget | null {
+  const execPath = processExecPath?.trim() || process.execPath?.trim() || "";
+  const argv1 = processArgv1?.trim() || process.argv[1]?.trim() || "";
+  if (!execPath || !argv1) {
+    return null;
+  }
+
+  const entryBasename = path.basename(argv1).toLowerCase();
+  if (OPENCLAW_ENTRY_BASENAMES.has(entryBasename)) {
+    return {
+      command: execPath,
+      args: [argv1]
+    };
+  }
+
+  const normalizedArgv1 = argv1.replace(/\\/g, "/").toLowerCase();
+  if (OPENCLAW_ENTRY_SUFFIXES.some((suffix) => normalizedArgv1.endsWith(suffix))) {
+    return {
+      command: execPath,
+      args: [argv1]
+    };
+  }
+
+  return null;
+}
+
+export function resolveOpenClawSpawnTarget(options?: {
+  explicitCommand?: string | null;
+  processExecPath?: string | null;
+  processArgv1?: string | null;
+}): OpenClawSpawnTarget {
+  const explicitCommand = resolveExplicitOpenClawCommand(options?.explicitCommand);
+  if (explicitCommand) {
+    return {
+      command: explicitCommand,
+      args: []
+    };
+  }
+
+  const currentProcessTarget = resolveCurrentProcessOpenClawTarget(
+    options?.processExecPath,
+    options?.processArgv1
+  );
+  if (currentProcessTarget) {
+    return currentProcessTarget;
+  }
+
+  return {
+    command: "openclaw",
+    args: []
+  };
+}
+
+export function resolveOpenClawCommand(): string {
+  return resolveOpenClawSpawnTarget().command;
 }
 
 export function resolveOpenClawProfileArgs(): string[] {
@@ -37,7 +105,8 @@ export function resolveOpenClawProfileArgs(): string[] {
 }
 
 export function spawnDetachedOpenClaw(args: string[], onError?: (error: unknown) => void) {
-  const child = spawn(resolveOpenClawCommand(), args, {
+  const target = resolveOpenClawSpawnTarget();
+  const child = spawn(target.command, [...target.args, ...args], {
     detached: true,
     stdio: "ignore",
     env: process.env
