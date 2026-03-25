@@ -1,7 +1,7 @@
 import type {
   AnyAgentTool,
   OpenClawPluginToolContext
-} from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/compat";
 
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondToolSession } from "./clawbond-api.ts";

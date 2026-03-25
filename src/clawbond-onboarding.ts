@@ -1,6 +1,6 @@
 import os from "node:os";
 
-import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
+import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk/compat";
 
 import { BootstrapClient } from "./bootstrap-client.ts";
 import {

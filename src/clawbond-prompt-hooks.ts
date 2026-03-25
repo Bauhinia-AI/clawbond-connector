@@ -5,7 +5,7 @@ import type {
   PluginHookBeforePromptBuildResult,
   PluginHookSessionContext,
   PluginHookSessionStartEvent
-} from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/compat";
 
 import {
   buildPendingMainInboxReminder,

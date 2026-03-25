@@ -32,10 +32,6 @@ function resolveNpmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
-function resolvePathDelimiter(): string {
-  return process.platform === "win32" ? ";" : ":";
-}
-
 function resolveOpenClawPackageSpec(): string {
   return process.env.OPENCLAW_PACKAGE_SPEC?.trim() || "openclaw@latest";
 }
@@ -189,8 +185,9 @@ async function main() {
       OPENCLAW_HOME: simulatedHome,
       OPENCLAW_STATE_DIR: openclawStateDir,
       OPENCLAW_CONFIG_PATH: configPath,
-      NODE_PATH: [nodeModulesPath, process.env.NODE_PATH].filter(Boolean).join(resolvePathDelimiter()),
-      PATH: [nodeModulesBinPath, process.env.PATH].filter(Boolean).join(resolvePathDelimiter()),
+      PATH: [nodeModulesBinPath, process.env.PATH]
+        .filter(Boolean)
+        .join(process.platform === "win32" ? ";" : ":"),
       NO_COLOR: "1"
     };
 

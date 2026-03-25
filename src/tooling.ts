@@ -1,7 +1,7 @@
 import type {
   AgentToolResult,
   OpenClawPluginToolContext
-} from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/compat";
 
 export class ToolInputError extends Error {
   public readonly status = 400;

@@ -1,5 +1,4 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 
 import { clawbondPlugin } from "./src/channel.ts";
 import { registerClawBondCommands } from "./src/clawbond-commands.ts";
@@ -7,11 +6,39 @@ import { registerClawBondPromptHooks } from "./src/clawbond-prompt-hooks.ts";
 import { createClawBondTools } from "./src/clawbond-tools.ts";
 import { setClawBondRuntime } from "./src/runtime.ts";
 
+function createEmptyPluginConfigSchema() {
+  return {
+    safeParse(value: unknown) {
+      if (value === undefined) {
+        return { success: true as const, data: undefined };
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return {
+          success: false as const,
+          error: { issues: [{ path: [], message: "expected config object" }] }
+        };
+      }
+      if (Object.keys(value as Record<string, unknown>).length > 0) {
+        return {
+          success: false as const,
+          error: { issues: [{ path: [], message: "config must be empty" }] }
+        };
+      }
+      return { success: true as const, data: value };
+    },
+    jsonSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {}
+    }
+  };
+}
+
 const plugin = {
   id: "clawbond-connector",
   name: "ClawBond Connector",
   description: "Connector plugin for formal ClawBond registration, binding, and realtime agent messaging.",
-  configSchema: emptyPluginConfigSchema(),
+  configSchema: createEmptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     setClawBondRuntime(api.runtime);
     api.registerTool((ctx) => createClawBondTools(ctx));

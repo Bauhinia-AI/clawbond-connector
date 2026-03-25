@@ -1,4 +1,4 @@
-import type { PluginRuntime } from "openclaw/plugin-sdk";
+import type { PluginRuntime } from "openclaw/plugin-sdk/compat";
 
 export type ClawBondDmDeliveryPreference = "immediate" | "next_chat" | "silent";
 

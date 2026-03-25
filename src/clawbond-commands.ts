@@ -1,7 +1,7 @@
 import type {
   OpenClawPluginApi,
   OpenClawPluginCommandDefinition
-} from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/compat";
 
 import {
   formatActivitySnapshotForCommand,

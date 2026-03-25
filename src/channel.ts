@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 
-import * as OpenClawPluginSdk from "openclaw/plugin-sdk";
-import {
-  type ChannelAccountSnapshot,
-  type ChannelGatewayContext,
-  type ChannelPlugin,
-  type OpenClawConfig
-} from "openclaw/plugin-sdk";
+import type {
+  ChannelAccountSnapshot,
+  ChannelGatewayContext,
+  ChannelPlugin,
+  OpenClawConfig
+} from "openclaw/plugin-sdk/compat";
 
 import { buildStoredCredentialsFromAccount, withRuntimeToken } from "./account-utils.ts";
 import { ClawBondActivityStore } from "./activity-store.ts";
@@ -96,63 +95,29 @@ function resolveOutboundMediaUrlsCompat(payload: {
   mediaUrls?: string[];
   mediaUrl?: string;
 }): string[] {
-  const sdkResolver = (
-    OpenClawPluginSdk as {
-      resolveOutboundMediaUrls?: (value: { mediaUrls?: string[]; mediaUrl?: string }) => string[];
-    }
-  ).resolveOutboundMediaUrls;
-
-  if (typeof sdkResolver === "function") {
-    return sdkResolver(payload);
+  if (payload.mediaUrls?.length) {
+    return payload.mediaUrls;
   }
-
-  const urls: string[] = [];
-  for (const value of payload.mediaUrls ?? []) {
-    if (typeof value !== "string") {
-      continue;
-    }
-    const trimmed = value.trim();
-    if (trimmed) {
-      urls.push(trimmed);
-    }
+  if (payload.mediaUrl) {
+    return [payload.mediaUrl];
   }
-
-  if (typeof payload.mediaUrl === "string") {
-    const trimmed = payload.mediaUrl.trim();
-    if (trimmed) {
-      urls.push(trimmed);
-    }
-  }
-
-  return [...new Set(urls)];
+  return [];
 }
 
 function formatTextWithAttachmentLinksCompat(text: string | undefined, mediaUrls: string[]): string {
-  const sdkFormatter = (
-    OpenClawPluginSdk as {
-      formatTextWithAttachmentLinks?: (value: string | undefined, urls: string[]) => string;
-    }
-  ).formatTextWithAttachmentLinks;
-
-  if (typeof sdkFormatter === "function") {
-    return sdkFormatter(text, mediaUrls);
+  const trimmedText = text?.trim() ?? "";
+  if (!trimmedText && mediaUrls.length === 0) {
+    return "";
   }
-
-  const trimmedText = typeof text === "string" ? text.trim() : "";
-  const trimmedUrls = mediaUrls
-    .filter((value) => typeof value === "string")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  if (trimmedUrls.length === 0) {
-    return trimmedText;
-  }
-
-  const attachmentBlock = trimmedUrls.join("\n");
+  const attachmentBlock = mediaUrls.length
+    ? mediaUrls.map((url) => `Attachment: ${url}`).join("\n")
+    : "";
   if (!trimmedText) {
     return attachmentBlock;
   }
-
+  if (!attachmentBlock) {
+    return trimmedText;
+  }
   return `${trimmedText}\n\n${attachmentBlock}`;
 }
 

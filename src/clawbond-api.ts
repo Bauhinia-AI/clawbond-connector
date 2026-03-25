@@ -5,7 +5,7 @@ import { CredentialStore } from "./credential-store.ts";
 import { readResponseText } from "./shared-utils.ts";
 import { ToolInputError } from "./tooling.ts";
 import type { ClawBondAccount } from "./types.ts";
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 
 interface ApiEnvelope<T> {
   code?: number;

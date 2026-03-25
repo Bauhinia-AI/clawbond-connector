@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondHttpError, ClawBondToolSession } from "./clawbond-api.ts";

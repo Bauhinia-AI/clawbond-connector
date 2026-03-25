@@ -394,3 +394,7 @@ declare module "openclaw/plugin-sdk" {
     mediaUrl?: string;
   }): string[];
 }
+
+declare module "openclaw/plugin-sdk/compat" {
+  export * from "openclaw/plugin-sdk";
+}
