@@ -187,17 +187,17 @@ async function main() {
       return false;
     }
 
-    try {
-      const wakeLog = await readFile(wakeLogPath, "utf-8");
+      try {
+        const wakeLog = await readFile(wakeLogPath, "utf-8");
         return (
           wakeLog.includes("gateway call chat.inject --params") &&
-          wakeLog.includes("system event --mode now --text") &&
-          !wakeLog.includes("gateway call chat.send --params") &&
+          wakeLog.includes("gateway call chat.send --params") &&
+          !wakeLog.includes("system event --mode now --text") &&
           wakeLog.includes(CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE) &&
-          wakeLog.includes("New notification from") &&
-          wakeLog.includes("Agent notified") &&
-          !wakeLog.includes("Handling new notification from") &&
-          wakeLog.includes("notification from") &&
+          wakeLog.includes("This is not a heartbeat poll. Do not reply with HEARTBEAT_OK.") &&
+          wakeLog.includes("New notification from user:human-001. Agent notified.") &&
+          !wakeLog.includes("New notification from user:human-001. Agent notified and handling now.") &&
+          wakeLog.includes("notification from user:human-001") &&
           !wakeLog.includes("notificationId: ws-1001") &&
           !wakeLog.includes("请实时处理这条推送。")
         );

@@ -17,7 +17,6 @@ function buildAccount(overrides: Partial<ClawBondAccount> = {}): ClawBondAccount
     serverUrl: "https://api.clawbond.ai",
     apiBaseUrl: "https://api.clawbond.ai",
     socialBaseUrl: "https://social.clawbond.ai",
-    benchmarkBaseUrl: "https://benchmark.clawbond.ai",
     stateRoot: "/tmp/clawbond-test",
     bootstrapEnabled: true,
     connectorToken: "",
@@ -64,16 +63,14 @@ function main() {
   assert.equal(deriveReceiveProfileFromLegacyDmPreference("next_chat"), "aggressive");
   assert.equal(deriveReceiveProfileFromLegacyDmPreference("silent"), "aggressive");
 
-  assert.deepEqual(buildRoutingMatrixForProfile("focus"), {
+  assert.deepEqual(buildRoutingMatrixForProfile("aggressive"), {
     owner_dm: "inject_main",
-    remote_agent_dm: "queue",
-    notification_learn: "queue",
-    notification_attention: "wake_only",
-    notification_general: "mute",
-    connection_request: "queue"
+    remote_agent_dm: "inject_main",
+    notification_learn: "inject_main",
+    notification_attention: "inject_main",
+    notification_general: "inject_main",
+    connection_request: "inject_main"
   });
-  assert.equal(buildRoutingMatrixForProfile("realtime").notification_general, "wake_only");
-  assert.equal(buildRoutingMatrixForProfile("aggressive").notification_general, "inject_main");
 
   const fallbackFromLegacy = normalizeUserSettings({
     dm_delivery_preference: "silent"
@@ -82,21 +79,21 @@ function main() {
 
   const preservedExplicitProfile = normalizeUserSettings({
     dm_delivery_preference: "silent",
-    receive_profile: "focus"
+    receive_profile: "aggressive"
   });
   assert.equal(preservedExplicitProfile.receive_profile, "aggressive");
 
   const overriddenMatrix = buildEffectiveRoutingMatrix(
     normalizeUserSettings({
-      receive_profile: "balanced",
+      receive_profile: "aggressive",
       receive_routing_overrides: {
         remote_agent_dm: "mute",
         notification_attention: "queue"
       }
     })
   );
-  assert.equal(overriddenMatrix.remote_agent_dm, "mute");
-  assert.equal(overriddenMatrix.notification_attention, "queue");
+  assert.equal(overriddenMatrix.remote_agent_dm, "inject_main");
+  assert.equal(overriddenMatrix.notification_attention, "inject_main");
   assert.equal(overriddenMatrix.owner_dm, "inject_main");
 
   const account = buildAccount();
@@ -169,12 +166,6 @@ function main() {
     "connection_request"
   );
 
-  const focusSettings = normalizeUserSettings({
-    receive_profile: "focus"
-  });
-  const realtimeSettings = normalizeUserSettings({
-    receive_profile: "realtime"
-  });
   const aggressiveSettings = normalizeUserSettings({
     receive_profile: "aggressive"
   });
@@ -182,7 +173,7 @@ function main() {
   assert.deepEqual(
     resolveInboundReceiveRouting(
       account,
-      focusSettings,
+      aggressiveSettings,
       buildMessage({
         senderType: "user",
         senderId: "user-owner"
@@ -193,7 +184,7 @@ function main() {
   assert.deepEqual(
     resolveInboundReceiveRouting(
       account,
-      focusSettings,
+      aggressiveSettings,
       buildMessage({
         senderType: "agent",
         senderId: "agent-remote"
@@ -204,7 +195,7 @@ function main() {
   assert.deepEqual(
     resolveInboundReceiveRouting(
       account,
-      realtimeSettings,
+      aggressiveSettings,
       buildMessage({
         sourceKind: "notification",
         notificationType: "attention"

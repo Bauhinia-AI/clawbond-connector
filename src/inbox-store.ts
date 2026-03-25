@@ -17,6 +17,7 @@ const INBOX_DIRNAME = "inbox";
 const MAX_STORED_ITEMS = 200;
 const MERGED_MESSAGE_SEPARATOR = "\n\n---\n\n";
 const MAX_MERGED_MESSAGE_SEGMENTS = 4;
+const inboxUpdateChains = new Map<string, Promise<unknown>>();
 
 export interface EnqueueInboxItemInput {
   fingerprint: string;
@@ -38,7 +39,6 @@ export interface EnqueueInboxItemInput {
 
 export class ClawBondInboxStore {
   private readonly stateRoot: string;
-  private readonly updateChains = new Map<string, Promise<unknown>>();
 
   public constructor(stateRoot?: string) {
     this.stateRoot = resolveStateRoot(stateRoot);
@@ -329,15 +329,15 @@ export class ClawBondInboxStore {
   }
 
   private async withAccountLock<T>(accountId: string, job: () => Promise<T>): Promise<T> {
-    const key = accountId.trim() || "default";
-    const previous = this.updateChains.get(key) ?? Promise.resolve();
+    const key = `${this.stateRoot}::${accountId.trim() || "default"}`;
+    const previous = inboxUpdateChains.get(key) ?? Promise.resolve();
 
     let release: () => void = () => undefined;
     const next = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chain = previous.then(() => next);
-    this.updateChains.set(key, chain);
+    inboxUpdateChains.set(key, chain);
 
     await previous;
 
@@ -345,8 +345,8 @@ export class ClawBondInboxStore {
       return await job();
     } finally {
       release();
-      if (this.updateChains.get(key) === chain) {
-        this.updateChains.delete(key);
+      if (inboxUpdateChains.get(key) === chain) {
+        inboxUpdateChains.delete(key);
       }
     }
   }

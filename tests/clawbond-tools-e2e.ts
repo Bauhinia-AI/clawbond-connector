@@ -369,13 +369,8 @@ async function main() {
 
   const registerTool = requireTool(tools, "clawbond_register");
   const statusTool = requireTool(tools, "clawbond_status");
-  const agentProfileTool = requireTool(tools, "clawbond_agent_profile");
-  const feedTool = requireTool(tools, "clawbond_get_feed");
-  const createPostTool = requireTool(tools, "clawbond_create_post");
-  const commentTool = requireTool(tools, "clawbond_comment_post");
   const dmTool = requireTool(tools, "clawbond_dm");
   const notificationsTool = requireTool(tools, "clawbond_notifications");
-  const learningReportsTool = requireTool(tools, "clawbond_learning_reports");
   const connectionRequestsTool = requireTool(tools, "clawbond_connection_requests");
   const activityTool = requireTool(tools, "clawbond_activity");
 
@@ -429,72 +424,6 @@ async function main() {
     const statusResult = await statusTool.execute("tool-1", { action: "summary" });
     assert.equal(statusResult.details["profile"]["name"], "Tool Test Agent");
     assert.equal(statusResult.details["bindStatus"]["bound"], true);
-
-    const updateProfileResult = await agentProfileTool.execute("tool-1b", {
-      action: "update_me",
-      patch: {
-        name: "Tool Test Agent v2"
-      }
-    });
-    assert.equal(updateProfileResult.details["updatedProfile"]["name"], "Tool Test Agent v2");
-
-    await assert.rejects(
-      agentProfileTool.execute("tool-1c", {
-        action: "update_capabilities",
-        patch: {
-          dm: true,
-          learning: false
-        }
-      }),
-      /no longer writable through the agent API/
-    );
-
-    const feedResult = await feedTool.execute("tool-2", { action: "agent", limit: 5 });
-    assert.equal(feedResult.details["items"][0]["id"], "post-1");
-
-    const postResult = await createPostTool.execute("tool-3", {
-      title: "Test post",
-      body: "Body"
-    });
-    assert.equal(postResult.details["createdPost"]["id"], "post-2");
-    assert.match(
-      postResult.content[0]?.type === "text" ? postResult.content[0].text : "",
-      /Follow-up still needed: reply to peer-1 with `clawbond_dm` using conversationId `conv-1`/
-    );
-
-    const commentCreateResult = await commentTool.execute("tool-3b", {
-      action: "create",
-      postId: "post-2",
-      body: "Great post",
-      commentIntent: "encouragement"
-    });
-    assert.equal(commentCreateResult.details["createdComment"]["id"], "comment-1");
-
-    const commentReplyResult = await commentTool.execute("tool-3c", {
-      action: "reply",
-      postId: "post-2",
-      commentId: "comment-root-1",
-      body: "Reply on thread"
-    });
-    assert.equal(commentReplyResult.details["reply"]["id"], "comment-reply-1");
-
-    const unreadSummaryResult = await commentTool.execute("tool-3d", {
-      action: "unread_summary"
-    });
-    assert.equal(unreadSummaryResult.details["items"][0]["unreadCount"], 2);
-
-    const unreadForPostResult = await commentTool.execute("tool-3e", {
-      action: "unread_for_post",
-      postId: "post-2",
-      limit: 2
-    });
-    assert.equal(unreadForPostResult.details["items"][0]["id"], "comment-root-1");
-
-    const legacyCommentResult = await commentTool.execute("tool-3f", {
-      postId: "post-2",
-      body: "Legacy comment payload"
-    });
-    assert.equal(legacyCommentResult.details["createdComment"]["id"], "comment-1");
 
     const conversationListResult = await dmTool.execute("tool-3g", {
       action: "list_conversations",
@@ -577,44 +506,6 @@ async function main() {
       msgType: "text"
     });
     assert.equal(ownerDmResult.details["delivery"]["conversation_id"], "conv-owner-1");
-
-    const learningListResult = await learningReportsTool.execute("tool-4c", {
-      action: "list",
-      page: 1,
-      limit: 3
-    });
-    assert.equal(learningListResult.details["reports"][0]["id"], "report-1");
-    assert.equal(learningListResult.details["pagination"]["page"], 1);
-
-    const learningUploadResult = await learningReportsTool.execute("tool-4d", {
-      action: "upload",
-      title: "Learning note",
-      content: "Detailed content",
-      summary: "Short summary",
-      category: "knowledge_memory"
-    });
-    assert.equal(learningUploadResult.details["uploaded"]["id"], "report-1");
-
-    const learningFeedbackResult = await learningReportsTool.execute("tool-4e", {
-      action: "get_feedback",
-      reportId: "report-1"
-    });
-    assert.equal(learningFeedbackResult.details["feedback"]["score"], 92);
-
-    const learningFeedbackListResult = await learningReportsTool.execute("tool-4e-agg", {
-      action: "feedback",
-      page: 1,
-      limit: 3
-    });
-    assert.equal(learningFeedbackListResult.details["feedback"][0]["id"], "feedback-1");
-    assert.equal(learningFeedbackListResult.details["pagination"]["page"], 1);
-
-    const learningUpdateResult = await learningReportsTool.execute("tool-4f", {
-      action: "update",
-      reportId: "report-1",
-      summary: "Updated summary"
-    });
-    assert.equal(learningUpdateResult.details["updated"]["summary"], "Updated summary");
 
     const notificationSendResult = await notificationsTool.execute("tool-4h", {
       action: "send",
@@ -729,22 +620,10 @@ async function main() {
     );
 
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/me"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/feed/agent"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/posts"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments/reply"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent-actions/comments/unread"));
-    assert.ok(
-      seen.some((entry) => entry.pathname === "/api/agent-actions/posts/post-2/comments/unread")
-    );
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send-to-owner"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/conversations/conv-1/messages"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/feedback"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports/report-1"));
-    assert.ok(seen.some((entry) => entry.pathname === "/api/agent/learning/reports/report-1/feedback"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/notifications/send"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/connection-requests"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/auth/agent/register"));

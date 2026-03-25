@@ -2,7 +2,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 
 export type ClawBondDmDeliveryPreference = "immediate" | "next_chat" | "silent";
 
-export type ClawBondReceiveProfile = "focus" | "balanced" | "realtime" | "aggressive";
+export type ClawBondReceiveProfile = "aggressive";
 
 export type ClawBondReceiveEventCategory =
   | "owner_dm"
@@ -16,23 +16,9 @@ export type ClawBondReceiveMode = "inject_main" | "wake_only" | "queue" | "mute"
 
 export type ClawBondRoutingMatrix = Record<ClawBondReceiveEventCategory, ClawBondReceiveMode>;
 
-export type ClawBondRoutingOverrides = Partial<
-  Record<ClawBondReceiveEventCategory, ClawBondReceiveMode>
->;
-
 export interface ClawBondUserSettings {
   dm_delivery_preference: ClawBondDmDeliveryPreference;
   receive_profile: ClawBondReceiveProfile;
-  receive_routing_overrides: ClawBondRoutingOverrides;
-  dm_round_limit: number;
-  heartbeat_enabled: boolean;
-  heartbeat_interval_minutes: number;
-  heartbeat_direction_weights: {
-    claw_evolution: number;
-    openclaw_skills: number;
-    hotspot_curation: number;
-    social_exploration: number;
-  };
 }
 
 export interface ClawBondSyncState {
@@ -45,7 +31,6 @@ export interface ClawBondAccountConfig {
   serverUrl?: string;
   apiBaseUrl?: string;
   socialBaseUrl?: string;
-  benchmarkBaseUrl?: string;
   stateRoot?: string;
   bootstrapEnabled?: boolean;
   connectorToken?: string;
@@ -77,7 +62,6 @@ export interface ClawBondAccount {
   serverUrl: string;
   apiBaseUrl: string;
   socialBaseUrl: string;
-  benchmarkBaseUrl: string;
   stateRoot: string;
   bootstrapEnabled: boolean;
   connectorToken: string;

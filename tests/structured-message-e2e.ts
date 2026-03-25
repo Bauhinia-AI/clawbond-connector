@@ -1,24 +1,75 @@
 import assert from "node:assert/strict";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { WebSocketServer } from "ws";
 
 import { clawbondPlugin } from "../src/channel.ts";
+import { loadClawBondPendingMainInboxSnapshot } from "../src/clawbond-assist.ts";
 import { resolveAccount } from "../src/config.ts";
 import { DEFAULT_STRUCTURED_MESSAGE_PREFIX } from "../src/message-envelope.ts";
+import { createClawBondBeforePromptBuildHandler } from "../src/clawbond-prompt-hooks.ts";
+import { CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE } from "../src/openclaw-cli.ts";
 import { setClawBondRuntime } from "../src/runtime.ts";
 
 async function main() {
   const stateRoot = await mkdtemp(path.join(tmpdir(), "clawbond-structured-message-e2e-"));
-  const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-  await once(wss, "listening");
+  const openclawDir = await mkdtemp(path.join(tmpdir(), "clawbond-structured-message-openclaw-"));
+  const fakeOpenClawPath = path.join(openclawDir, "openclaw");
+  const originalOpenClawBin = process.env.CLAWBOND_OPENCLAW_BIN;
+  process.env.CLAWBOND_OPENCLAW_BIN = fakeOpenClawPath;
+  await writeFile(fakeOpenClawPath, ['#!/bin/sh', "exit 0"].join("\n"), "utf-8");
+  await chmod(fakeOpenClawPath, 0o755);
 
-  const address = wss.address();
+  const wss = new WebSocketServer({ noServer: true });
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+
+    const send = (status: number, data: unknown, pagination?: unknown) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: status, data, message: "ok", pagination }));
+    };
+
+    if (url.pathname === "/api/agent/messages/poll") {
+      send(200, [], { next_cursor: null });
+      return;
+    }
+
+    if (url.pathname === "/api/agent/bind-status") {
+      send(200, { bound: true, user_id: "user-1", username: "owner" });
+      return;
+    }
+
+    if (url.pathname === "/api/agent/me") {
+      send(200, { id: "agent-local", name: "Local Agent", user_id: "user-1" });
+      return;
+    }
+
+    send(404, null);
+  });
+
+  server.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+
+    assert.equal(url.searchParams.get("token"), "rt_test");
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  const address = server.address();
   if (!address || typeof address === "string") {
-    throw new Error("Failed to resolve test WebSocket address");
+    throw new Error("Failed to resolve test server address");
   }
 
   const trustedContent =
@@ -41,45 +92,25 @@ async function main() {
       body: "This should stay plain because the sender is not trusted."
     });
 
-  const receivedFromPlugin: Array<{ to_agent_id: string; content: string }> = [];
-  const inboundContexts: Array<Record<string, unknown>> = [];
-  let latestStatus: Record<string, unknown> = { accountId: "default" };
-
-  const connectionPromise = new Promise<void>((resolve, reject) => {
-    wss.once("connection", (socket, req) => {
-      try {
-        const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
-        assert.equal(requestUrl.pathname, "/ws");
-        assert.equal(requestUrl.searchParams.get("token"), "rt_test");
-      } catch (error) {
-        reject(error);
-        return;
-      }
-
-      socket.on("message", (data) => {
-        receivedFromPlugin.push(JSON.parse(data.toString()) as { to_agent_id: string; content: string });
-        if (receivedFromPlugin.length >= 2) {
-          resolve();
-        }
-      });
-
-      socket.send(
+  const connected = new Promise<void>((resolve) => {
+    wss.once("connection", (ws) => {
+      ws.send(
         JSON.stringify({
           event: "message",
           from_agent_id: "agent-rec-sys",
           content: trustedContent,
           timestamp: "2026-03-18T09:00:00.000Z"
-        }),
+        })
       );
-
-      socket.send(
+      ws.send(
         JSON.stringify({
           event: "message",
           from_agent_id: "agent-untrusted",
           content: untrustedContent,
           timestamp: "2026-03-18T09:00:01.000Z"
-        }),
+        })
       );
+      resolve();
     });
   });
 
@@ -92,57 +123,24 @@ async function main() {
         bootstrapEnabled: false,
         runtimeToken: "rt_test",
         agentId: "agent-local",
+        bindingStatus: "bound",
+        notificationsEnabled: false,
+        visibleMainSessionNotes: false,
+        bindStatusPollIntervalMs: 60_000,
         trustedSenderAgentIds: ["agent-rec-sys"]
       }
     }
   };
 
   const account = resolveAccount(cfg, "default");
-  const stubChannelRuntime = {
-    routing: {
-      resolveAgentRoute: ({ peer }: { peer: { id: string } }) => ({
-        agentId: "local-openclaw-agent",
-        sessionKey: `channel:clawbond:peer:${peer.id}`
-      })
-    },
-    session: {
-      resolveStorePath: () => "/tmp/clawbond-structured-message-e2e",
-      readSessionUpdatedAt: () => undefined,
-      recordInboundSession: async ({ ctx }: { ctx: Record<string, unknown> }) => {
-        inboundContexts.push(ctx);
-      }
-    },
-    reply: {
-      finalizeInboundContext: <T extends Record<string, unknown>>(ctx: T) => ctx,
-      resolveEnvelopeFormatOptions: () => undefined,
-      formatAgentEnvelope: ({ body }: { body: string }) => body,
-      dispatchReplyWithBufferedBlockDispatcher: async ({
-        ctx,
-        dispatcherOptions
-      }: {
-        ctx: Record<string, unknown>;
-        dispatcherOptions: { deliver: (payload: { text: string }) => Promise<void> };
-      }) => {
-        const bodyForAgent = String(ctx.BodyForAgent ?? "");
-        const classification = bodyForAgent.includes("ClawBond platform event")
-          ? "structured"
-          : "plain";
-
-        await dispatcherOptions.deliver({
-          text: `ACK:${classification}`
-        });
-      }
-    }
-  };
 
   setClawBondRuntime({
     logger: {
       info: () => undefined,
       warn: () => undefined,
       error: () => undefined
-    },
-    channel: stubChannelRuntime
-  });
+    }
+  } as never);
 
   const abortController = new AbortController();
   const runPromise = clawbondPlugin.gateway?.startAccount?.({
@@ -156,11 +154,9 @@ async function main() {
       error: () => undefined,
       debug: () => undefined
     },
-    channelRuntime: stubChannelRuntime,
-    getStatus: () => latestStatus,
-    setStatus: (next) => {
-      latestStatus = { ...next };
-    }
+    channelRuntime: {} as never,
+    getStatus: () => ({ accountId: "default" }),
+    setStatus: () => undefined
   });
 
   if (!runPromise) {
@@ -168,35 +164,68 @@ async function main() {
   }
 
   try {
-    await connectionPromise;
+    await connected;
+    await waitFor(() => {
+      const snapshot = loadClawBondPendingMainInboxSnapshot(cfg, "default", 10);
+      return snapshot?.items.length === 2;
+    }, 5000);
 
-    assert.equal(inboundContexts.length, 2);
-    assert.equal(receivedFromPlugin.length, 2);
+    const snapshot = loadClawBondPendingMainInboxSnapshot(cfg, "default", 10);
+    assert.ok(snapshot, "expected pending main inbox snapshot");
+    assert.equal(snapshot?.items.length, 2);
 
-    const repliesByTarget = new Map(
-      receivedFromPlugin.map((entry) => [entry.to_agent_id, entry.content])
+    const trustedItem = snapshot?.items.find((item) => item.peerId === "agent-rec-sys");
+    const untrustedItem = snapshot?.items.find((item) => item.peerId === "agent-untrusted");
+
+    assert.ok(trustedItem, "expected trusted pending item");
+    assert.ok(untrustedItem, "expected untrusted pending item");
+    assert.match(trustedItem?.content ?? "", /ClawBond platform event/);
+    assert.match(trustedItem?.content ?? "", /Type: learn\.push/);
+    assert.match(trustedItem?.content ?? "", /Task ID: learn_001/);
+    assert.match(trustedItem?.content ?? "", /Payload JSON:/);
+    assert.equal(untrustedItem?.content, untrustedContent);
+
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const hook = createClawBondBeforePromptBuildHandler({
+      config: cfg,
+      logger: { warn: () => undefined }
+    });
+
+    const hookResult = await hook(
+      {
+        prompt: CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE,
+        messages: [{ text: CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE }]
+      } as never,
+      {
+        sessionId: "session-main",
+        sessionKey: "agent:main:main",
+        channelId: "web",
+        trigger: "system"
+      } as never
     );
-    assert.equal(repliesByTarget.get("agent-rec-sys"), "ACK:structured");
-    assert.equal(repliesByTarget.get("agent-untrusted"), "ACK:plain");
 
-    const trustedContext =
-      inboundContexts.find((entry) => entry.RawBody === trustedContent) ?? {};
-    assert.equal(trustedContext.RawBody, trustedContent);
-    assert.match(String(trustedContext.BodyForAgent ?? ""), /ClawBond platform event/);
-    assert.match(String(trustedContext.BodyForAgent ?? ""), /Type: learn\.push/);
-    assert.match(String(trustedContext.BodyForAgent ?? ""), /Task ID: learn_001/);
-    assert.match(String(trustedContext.BodyForAgent ?? ""), /Payload JSON:/);
-
-    const untrustedContext =
-      inboundContexts.find((entry) => entry.RawBody === untrustedContent) ?? {};
-    assert.equal(untrustedContext.RawBody, untrustedContent);
-    assert.equal(untrustedContext.BodyForAgent, untrustedContent);
-    assert.equal(typeof latestStatus.lastOutboundAt, "number");
+    const injected = hookResult?.prependSystemContext ?? "";
+    assert.match(injected, /ClawBond internal realtime payload/);
+    assert.match(injected, /ClawBond platform event/);
+    assert.match(injected, /Type: learn\.push/);
+    assert.match(injected, /\[CLAWBOND_EVENT\]/);
+    assert.match(injected, /This should stay plain because the sender is not trusted\./);
 
     console.log("structured-message E2E passed");
   } finally {
     abortController.abort();
     await runPromise;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {
@@ -207,8 +236,36 @@ async function main() {
         resolve();
       });
     });
+    if (originalOpenClawBin === undefined) {
+      delete process.env.CLAWBOND_OPENCLAW_BIN;
+    } else {
+      process.env.CLAWBOND_OPENCLAW_BIN = originalOpenClawBin;
+    }
+    await rm(openclawDir, { recursive: true, force: true });
     await rm(stateRoot, { recursive: true, force: true });
   }
+}
+
+function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+
+    const tick = () => {
+      if (predicate()) {
+        resolve();
+        return;
+      }
+
+      if (Date.now() >= deadline) {
+        reject(new Error("Timed out waiting for structured messages to reach the pending inbox"));
+        return;
+      }
+
+      setTimeout(tick, 25);
+    };
+
+    tick();
+  });
 }
 
 await main();

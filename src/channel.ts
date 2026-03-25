@@ -923,7 +923,7 @@ async function dispatchPlatformInvoke(
     peerId: peer.peerId,
     peerLabel: peer.peerLabel,
     summary: `Pending ${describeSourceKind(message)} from ${peer.peerLabel}`,
-    content: message.rawPrompt ?? message.prompt,
+    content: message.structuredEnvelope ? message.prompt : (message.rawPrompt ?? message.prompt),
     receivedAt: message.timestamp,
     deliveryPath,
     requestId: message.requestId,

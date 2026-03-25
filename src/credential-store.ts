@@ -4,11 +4,8 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
-  ClawBondReceiveEventCategory,
-  ClawBondReceiveMode,
   ClawBondReceiveProfile,
   ClawBondRoutingMatrix,
-  ClawBondRoutingOverrides,
   ClawBondStoredAgent,
   ClawBondStoredCredentials,
   ClawBondSyncState,
@@ -18,67 +15,20 @@ import type {
 const DEFAULT_STATE_ROOT = path.join(os.homedir(), ".clawbond");
 const DEFAULT_USER_SETTINGS: ClawBondUserSettings = {
   dm_delivery_preference: "immediate",
-  receive_profile: "aggressive",
-  receive_routing_overrides: {},
-  dm_round_limit: 10,
-  heartbeat_enabled: false,
-  heartbeat_interval_minutes: 10,
-  heartbeat_direction_weights: {
-    claw_evolution: 25,
-    openclaw_skills: 25,
-    hotspot_curation: 25,
-    social_exploration: 25
-  }
+  receive_profile: "aggressive"
 };
 const DEFAULT_SYNC_STATE: ClawBondSyncState = {
   last_seen_dm_cursor: null,
   heartbeat_last_run_at: null
 };
 
-const RECEIVE_EVENT_CATEGORIES: ClawBondReceiveEventCategory[] = [
-  "owner_dm",
-  "remote_agent_dm",
-  "notification_learn",
-  "notification_attention",
-  "notification_general",
-  "connection_request"
-];
-
-const RECEIVE_MODES: ClawBondReceiveMode[] = ["inject_main", "wake_only", "queue", "mute"];
-
-const PROFILE_ROUTING_MATRIX: Record<ClawBondReceiveProfile, ClawBondRoutingMatrix> = {
-  focus: {
-    owner_dm: "inject_main",
-    remote_agent_dm: "queue",
-    notification_learn: "queue",
-    notification_attention: "wake_only",
-    notification_general: "mute",
-    connection_request: "queue"
-  },
-  balanced: {
-    owner_dm: "inject_main",
-    remote_agent_dm: "wake_only",
-    notification_learn: "wake_only",
-    notification_attention: "inject_main",
-    notification_general: "wake_only",
-    connection_request: "wake_only"
-  },
-  realtime: {
-    owner_dm: "inject_main",
-    remote_agent_dm: "inject_main",
-    notification_learn: "inject_main",
-    notification_attention: "inject_main",
-    notification_general: "wake_only",
-    connection_request: "inject_main"
-  },
-  aggressive: {
-    owner_dm: "inject_main",
-    remote_agent_dm: "inject_main",
-    notification_learn: "inject_main",
-    notification_attention: "inject_main",
-    notification_general: "inject_main",
-    connection_request: "inject_main"
-  }
+const DEFAULT_ROUTING_MATRIX: ClawBondRoutingMatrix = {
+  owner_dm: "inject_main",
+  remote_agent_dm: "inject_main",
+  notification_learn: "inject_main",
+  notification_attention: "inject_main",
+  notification_general: "inject_main",
+  connection_request: "inject_main"
 };
 
 export class CredentialStore {
@@ -372,18 +322,7 @@ export function normalizeUserSettings(value: unknown): ClawBondUserSettings {
 
   return {
     dm_delivery_preference: normalizedDmDeliveryPreference,
-    receive_profile: receiveProfile,
-    receive_routing_overrides: normalizeRoutingOverrides(candidate.receive_routing_overrides),
-    dm_round_limit: normalizePositiveInteger(candidate.dm_round_limit, defaults.dm_round_limit),
-    heartbeat_enabled:
-      typeof candidate.heartbeat_enabled === "boolean"
-        ? candidate.heartbeat_enabled
-        : defaults.heartbeat_enabled,
-    heartbeat_interval_minutes: normalizePositiveInteger(
-      candidate.heartbeat_interval_minutes,
-      defaults.heartbeat_interval_minutes
-    ),
-    heartbeat_direction_weights: normalizeDirectionWeights(candidate.heartbeat_direction_weights)
+    receive_profile: receiveProfile
   };
 }
 
@@ -406,34 +345,13 @@ export function normalizeSyncState(value: unknown): ClawBondSyncState {
   };
 }
 
-function normalizeDirectionWeights(value: unknown): ClawBondUserSettings["heartbeat_direction_weights"] {
-  const defaults = getDefaultUserSettings().heartbeat_direction_weights;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return defaults;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return {
-    claw_evolution: normalizeNonNegativeInteger(candidate.claw_evolution, defaults.claw_evolution),
-    openclaw_skills: normalizeNonNegativeInteger(candidate.openclaw_skills, defaults.openclaw_skills),
-    hotspot_curation: normalizeNonNegativeInteger(candidate.hotspot_curation, defaults.hotspot_curation),
-    social_exploration: normalizeNonNegativeInteger(
-      candidate.social_exploration,
-      defaults.social_exploration
-    )
-  };
-}
-
 export function buildRoutingMatrixForProfile(profile: ClawBondReceiveProfile): ClawBondRoutingMatrix {
-  const matrix = PROFILE_ROUTING_MATRIX[profile] ?? PROFILE_ROUTING_MATRIX.balanced;
-  return { ...matrix };
+  void profile;
+  return { ...DEFAULT_ROUTING_MATRIX };
 }
 
 export function buildEffectiveRoutingMatrix(settings: ClawBondUserSettings): ClawBondRoutingMatrix {
-  return {
-    ...buildRoutingMatrixForProfile(settings.receive_profile),
-    ...settings.receive_routing_overrides
-  };
+  return buildRoutingMatrixForProfile(settings.receive_profile);
 }
 
 export function deriveReceiveProfileFromLegacyDmPreference(
@@ -449,42 +367,4 @@ function normalizeReceiveProfile(
 ): ClawBondReceiveProfile {
   void value;
   return deriveReceiveProfileFromLegacyDmPreference(legacyDmPreference);
-}
-
-function normalizeRoutingOverrides(value: unknown): ClawBondRoutingOverrides {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const normalized: ClawBondRoutingOverrides = {};
-
-  for (const category of RECEIVE_EVENT_CATEGORIES) {
-    const mode = candidate[category];
-    if (typeof mode === "string" && isReceiveMode(mode)) {
-      normalized[category] = mode;
-    }
-  }
-
-  return normalized;
-}
-
-function isReceiveMode(value: string): value is ClawBondReceiveMode {
-  return RECEIVE_MODES.includes(value as ClawBondReceiveMode);
-}
-
-function normalizePositiveInteger(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return fallback;
-  }
-
-  return Math.max(1, Math.trunc(value));
-}
-
-function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return fallback;
-  }
-
-  return Math.max(0, Math.trunc(value));
 }

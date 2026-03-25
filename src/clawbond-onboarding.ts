@@ -7,16 +7,13 @@ import { resolveAccount, resolveSocialBaseUrl } from "./config.ts";
 import {
   buildEffectiveRoutingMatrix,
   CredentialStore,
-  deriveReceiveProfileFromLegacyDmPreference,
   getDefaultUserSettings,
   normalizeUserSettings,
   resolveStateRoot
 } from "./credential-store.ts";
 import type {
-  ClawBondDmDeliveryPreference,
   ClawBondReceiveProfile,
   ClawBondRoutingMatrix,
-  ClawBondRoutingOverrides,
   ClawBondStoredCredentials
 } from "./types.ts";
 
@@ -54,7 +51,6 @@ export type ClawBondOnboardingSummary = {
   suggestedAgentName: string;
   notificationsEnabled: boolean;
   visibleMainSessionNotes: boolean;
-  dmDeliveryPreference: ClawBondDmDeliveryPreference;
   receiveProfile: ClawBondReceiveProfile;
   effectiveRoutingMatrix: ClawBondRoutingMatrix;
   suggestedUserPhrases: string[];
@@ -308,7 +304,6 @@ export function buildClawBondOnboardingSummary(
     suggestedAgentName: buildSuggestedAgentName(),
     notificationsEnabled: account.notificationsEnabled,
     visibleMainSessionNotes: account.visibleMainSessionNotes,
-    dmDeliveryPreference: settings.dm_delivery_preference,
     receiveProfile: settings.receive_profile,
     effectiveRoutingMatrix: buildEffectiveRoutingMatrix(settings),
     suggestedUserPhrases: buildSuggestedUserPhrases(phase),
@@ -327,9 +322,6 @@ export async function runClawBondLocalConfigUpdate(params: {
   accountId?: string | null;
   notificationsEnabled?: boolean;
   visibleMainSessionNotes?: boolean;
-  dmDeliveryPreference?: ClawBondDmDeliveryPreference | null;
-  receiveProfile?: ClawBondReceiveProfile | null;
-  receiveRoutingOverrides?: ClawBondRoutingOverrides | null;
 }): Promise<string> {
   const currentConfig = params.runtime?.config?.loadConfig?.() ?? params.cfg;
   const setupPlan = buildClawBondSetupConfig(currentConfig);
@@ -370,45 +362,6 @@ export async function runClawBondLocalConfigUpdate(params: {
     await writeConfigFile(nextConfig);
   }
 
-  let settingsSaved = false;
-  let receiveProfileStatus = "";
-  let routingOverrideStatus = "";
-  const effectiveReceiveProfile =
-    params.receiveProfile ??
-    (params.dmDeliveryPreference
-      ? deriveReceiveProfileFromLegacyDmPreference(params.dmDeliveryPreference)
-      : null);
-  const shouldSaveUserSettings =
-    Boolean(params.dmDeliveryPreference) ||
-    Boolean(effectiveReceiveProfile) ||
-    Boolean(params.receiveRoutingOverrides);
-  if (shouldSaveUserSettings) {
-    const nextSummary = buildClawBondOnboardingSummary(nextConfig, params.accountId);
-    const store = new CredentialStore(resolveStateRoot(nextChannel.stateRoot as string | undefined));
-    const existingSettings = normalizeUserSettings(
-      store.loadUserSettingsSync(nextSummary.accountId)
-    );
-    settingsSaved = await store.saveUserSettings(nextSummary.accountId, {
-      ...existingSettings,
-      dm_delivery_preference: params.dmDeliveryPreference ?? existingSettings.dm_delivery_preference,
-      receive_profile: effectiveReceiveProfile ?? existingSettings.receive_profile,
-      receive_routing_overrides: params.receiveRoutingOverrides
-        ? { ...existingSettings.receive_routing_overrides, ...params.receiveRoutingOverrides }
-        : existingSettings.receive_routing_overrides
-    });
-    if (effectiveReceiveProfile) {
-      receiveProfileStatus = settingsSaved
-        ? effectiveReceiveProfile
-        : `pending (${effectiveReceiveProfile}; available after agent registration)`;
-    }
-    if (params.receiveRoutingOverrides) {
-      const overrideCount = Object.keys(params.receiveRoutingOverrides).length;
-      routingOverrideStatus = settingsSaved
-        ? `${overrideCount} override(s)`
-        : `pending (${overrideCount} override(s); available after agent registration)`;
-    }
-  }
-
   const summary = buildClawBondOnboardingSummary(
     params.runtime?.config?.loadConfig?.() ?? nextConfig,
     params.accountId
@@ -420,13 +373,6 @@ export async function runClawBondLocalConfigUpdate(params: {
     `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
     `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`
   ];
-
-  if (effectiveReceiveProfile) {
-    lines.push(`- receive profile: ${receiveProfileStatus}`);
-  }
-  if (params.receiveRoutingOverrides) {
-    lines.push(`- receive routing overrides: ${routingOverrideStatus}`);
-  }
 
   lines.push("", `Next: ${summary.nextStep}`);
   return lines.join("\n");
@@ -535,7 +481,6 @@ export function buildClawBondDoctorReport(
     `- notifications: ${summary.notificationsEnabled ? "enabled" : "disabled"}`,
     `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
     `- receive_profile: ${summary.receiveProfile} (fixed local default)`,
-    `- dm_delivery_preference (legacy): ${summary.dmDeliveryPreference}`,
     `- server_ws: ${formatDoctorServerWsStatus(serverWsStatus)} (managed by web)`,
     summary.inviteUrl ? `- invite: ${summary.inviteUrl}` : "",
     summary.agentName ? "" : `- suggested agent name: ${summary.suggestedAgentName}`,

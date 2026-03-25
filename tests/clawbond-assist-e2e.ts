@@ -233,21 +233,8 @@ async function main() {
 
     const commands = createClawBondCommands({ config: cfg });
     const rootCommand = commands.find((entry) => entry.name === "clawbond");
-    const setupCommand = commands.find((entry) => entry.name === "clawbond-setup");
-    const registerCommand = commands.find((entry) => entry.name === "clawbond-register");
-    const bindCommand = commands.find((entry) => entry.name === "clawbond-bind");
-    const doctorCommand = commands.find((entry) => entry.name === "clawbond-doctor");
-    const statusCommand = commands.find((entry) => entry.name === "clawbond-status");
-    const inboxCommand = commands.find((entry) => entry.name === "clawbond-inbox");
-    const activityCommand = commands.find((entry) => entry.name === "clawbond-activity");
     assert.ok(rootCommand);
-    assert.ok(setupCommand);
-    assert.ok(registerCommand);
-    assert.ok(bindCommand);
-    assert.ok(doctorCommand);
-    assert.ok(statusCommand);
-    assert.ok(inboxCommand);
-    assert.ok(activityCommand);
+    assert.equal(commands.length, 1);
 
     const rootHelpResult = await rootCommand?.handler({
       channel: "web",
@@ -284,10 +271,11 @@ async function main() {
     assert.match(rootDoctorResult?.text ?? "", /visible realtime notes: on/);
     assert.match(rootDoctorResult?.text ?? "", /server_ws: true/);
 
-    const directDoctorResult = await doctorCommand?.handler({
+    const directDoctorResult = await rootCommand?.handler({
       channel: "web",
       isAuthorizedSender: true,
-      commandBody: "/clawbond-doctor",
+      commandBody: "/clawbond doctor",
+      args: "doctor",
       config: cfg
     } as never);
     assert.match(directDoctorResult?.text ?? "", /ClawBond is ready/);
@@ -316,13 +304,13 @@ async function main() {
         }
       } as never
     });
-    const directSetupCommand = setupCommands.find((entry) => entry.name === "clawbond-setup");
-    assert.ok(directSetupCommand);
-    const directSetupResult = await directSetupCommand?.handler({
+    const setupRootCommand = setupCommands.find((entry) => entry.name === "clawbond");
+    assert.ok(setupRootCommand);
+    const directSetupResult = await setupRootCommand?.handler({
       channel: "web",
       isAuthorizedSender: true,
-      commandBody: "/clawbond-setup Setup Agent",
-      args: "Setup Agent",
+      commandBody: "/clawbond setup Setup Agent",
+      args: "setup Setup Agent",
       config: emptyCfg
     } as never);
     assert.match(directSetupResult?.text ?? "", /ClawBond setup saved/);
@@ -358,31 +346,34 @@ async function main() {
     assert.match(pendingWelcome, /先告诉我你想在 ClawBond 上用什么名字/);
     assert.doesNotMatch(pendingWelcome, /\/clawbond/);
 
-    const statusResult = await statusCommand?.handler({
+    const statusResult = await rootCommand?.handler({
       channel: "web",
       isAuthorizedSender: true,
-      commandBody: "/clawbond-status",
+      commandBody: "/clawbond status",
+      args: "status",
       config: cfg
     } as never);
     assert.match(statusResult?.text ?? "", /binding: bound/);
     assert.match(statusResult?.text ?? "", /visible realtime notes: on/);
     assert.match(statusResult?.text ?? "", /receive_profile: aggressive/);
-    assert.match(statusResult?.text ?? "", /dm_delivery_preference \(legacy\): immediate/);
+    assert.doesNotMatch(statusResult?.text ?? "", /dm_delivery_preference \(legacy\):/);
     assert.match(statusResult?.text ?? "", /server_ws: true/);
 
-    const inboxResult = await inboxCommand?.handler({
+    const inboxResult = await rootCommand?.handler({
       channel: "web",
       isAuthorizedSender: true,
-      commandBody: "/clawbond-inbox",
+      commandBody: "/clawbond inbox",
+      args: "inbox",
       config: cfg
     } as never);
     assert.match(inboxResult?.text ?? "", /unread notifications: 2/);
     assert.match(inboxResult?.text ?? "", /pending connection requests: 1/);
 
-    const activityResult = await activityCommand?.handler({
+    const activityResult = await rootCommand?.handler({
       channel: "web",
       isAuthorizedSender: true,
-      commandBody: "/clawbond-activity",
+      commandBody: "/clawbond activity",
+      args: "activity",
       config: cfg
     } as never);
     assert.match(activityResult?.text ?? "", /active legacy background sessions: 1/);

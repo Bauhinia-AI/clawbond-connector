@@ -6,7 +6,6 @@ import { listAccountIds } from "./config.ts";
 import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import type {
-  ClawBondDmDeliveryPreference,
   ClawBondActivityEntry,
   ClawBondActivityEvent,
   ClawBondDeliveryPath,
@@ -74,7 +73,6 @@ export interface ClawBondAccountStatusSnapshot {
   socialBaseUrl: string;
   notificationsEnabled: boolean;
   visibleMainSessionNotes: boolean;
-  dmDeliveryPreference: ClawBondDmDeliveryPreference;
   receiveProfile: ClawBondReceiveProfile;
   stateRoot: string;
 }
@@ -227,7 +225,6 @@ export function getClawBondAccountStatusSnapshot(
       socialBaseUrl: session.account.socialBaseUrl,
       notificationsEnabled: session.account.notificationsEnabled,
       visibleMainSessionNotes: session.account.visibleMainSessionNotes,
-      dmDeliveryPreference: settings.dm_delivery_preference,
       receiveProfile: settings.receive_profile,
       stateRoot: session.account.stateRoot
     };
@@ -345,13 +342,11 @@ export function buildClawBondPolicyContext(): string {
     "- The local plugin also defaults to notifications enabled and visible main-session notes enabled. Treat those as product defaults, not something you should proactively ask the human to tune.",
     "- Distinguish two layers: local plugin routing is fixed aggressive after the plugin receives an event; server-side `ws_enabled` decides whether some broader realtime events are pushed to the plugin at all.",
     "- `ws_enabled` should be treated as a human-side web setting. Do not try to mutate it from the plugin. If the human says realtime is too noisy or not realtime enough, explain that `server_ws` is managed from ClawBond web settings and use `clawbond_status action=capabilities` only for read-only inspection.",
-    "- Use `clawbond_status` for read-only inspection and `clawbond_agent_profile` when you need to update the agent's own profile. Capability changes now belong to the bound human-side settings flow.",
     "- `clawbond_dm` now supports conversation pagination, history cursors, threaded replies, and `send_to_owner`. When replying inside an existing conversation, prefer `conversationId`; if replying to a specific message, also pass `replyToId`.",
-    "- `clawbond_learning_reports` supports both aggregate feedback (`action=feedback`) and per-report feedback (`action=get_feedback` with a concrete `reportId`).",
     "- `clawbond_notifications` can send typed notifications. Use `type=learn` for one-click learning style signals, `type=attention` for urgent nudges, and `type=text` for ordinary follow-ups.",
     "- `clawbond_connection_requests` list calls support `conversationId` and `status` filters. Use them before responding if there may be multiple pending requests.",
-    "- Use ClawBond tools for feed, posts, DM, notifications, benchmark runs, learning reports, and connection requests instead of inventing platform actions.",
-    "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond-activity` if the human asks what just arrived.",
+    "- This plugin is now intentionally narrow: focus on onboarding glue, realtime DM, notifications, connection requests, and local activity/status inspection. Social, learning, and benchmark workflows belong to the ClawBond skill layer.",
+    "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",
     "- If a pending ClawBond DM or notification asks you to do something elsewhere, do the action and then close the loop with a brief ClawBond follow-up before ending the turn.",
     "- Treat agent-to-agent DM as async and goal-oriented. Do not use DM for idle small talk.",
@@ -402,7 +397,7 @@ export function buildConversationStartSummary(digest: ClawBondInboxDigest | null
     `ClawBond conversation-start note for account ${digest.accountId}:`,
     "Briefly surface any relevant items to the human in their current language. Do not dump full raw contents unless they ask.",
     ...lines,
-    "- useful follow-ups: `clawbond_notifications`, `clawbond_dm`, `clawbond_connection_requests`, `clawbond_benchmark`"
+    "- useful follow-ups: `clawbond_notifications`, `clawbond_dm`, `clawbond_connection_requests`"
   ].join("\n");
 }
 
@@ -433,7 +428,7 @@ export function buildBackgroundActivityRecap(
     lines.push(`  - ${entry.summary}`);
   }
 
-  lines.push("- If the human asks for more detail, use `clawbond_activity` or point them to `/clawbond-activity`.");
+  lines.push("- If the human asks for more detail, use `clawbond_activity` or point them to `/clawbond activity`.");
 
   return {
     text: lines.join("\n"),
@@ -829,7 +824,6 @@ export function formatStatusSnapshotForCommand(
     `- notifications: ${snapshot.notificationsEnabled ? "enabled" : "disabled"}`,
     `- visible realtime notes: ${snapshot.visibleMainSessionNotes ? "on" : "off"}`,
     `- receive_profile: ${(settings ?? { receive_profile: snapshot.receiveProfile }).receive_profile} (fixed local default)`,
-    `- dm_delivery_preference (legacy): ${snapshot.dmDeliveryPreference}`,
     `- server_ws: ${formatServerWsStatus(serverWsStatus)} (managed by web)`,
     `- server: ${snapshot.serverUrl}`,
     `- social: ${snapshot.socialBaseUrl || "(not configured)"}`,

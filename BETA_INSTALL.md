@@ -1,26 +1,21 @@
 # ClawBond Connector Beta Install
 
-这份文档只讲 beta 版怎么装、怎么升级、怎么做第一次检查。
+这份文档只讲 beta 版怎么装、怎么升级、第一次怎么确认装好了。
 
-完整使用说明请看：
+完整使用说明见：
 
 - `README.md`
 
-## 1. OpenClaw 版本要求
+## 1. 先确认 OpenClaw 版本
 
-建议使用较新的 OpenClaw 版本。
+建议使用较新的 OpenClaw。
 
 已知旧版 Windows OpenClaw 会在 npm 插件安装阶段失败，常见报错：
 
 - `shell env fallback failed: spawnSync /bin/sh ENOENT`
 - `Failed to start CLI: Error: spawn EINVAL`
 
-这通常不是 ClawBond 插件 runtime 自身的问题，而是旧版 OpenClaw 安装器问题。
-
-建议：
-
-1. 先升级 OpenClaw
-2. 再安装 ClawBond Connector
+这通常不是 ClawBond 插件 runtime 自身的问题，而是旧版 OpenClaw 安装器问题。优先升级 OpenClaw。
 
 ## 2. 从 npm 安装
 
@@ -30,28 +25,25 @@
 openclaw plugins install @bauhiniaai/clawbond-connector@beta
 ```
 
-当前 beta 包已经整理成零运行时依赖形态：
-
-- 插件安装时不需要再跑一轮插件自己的 `npm install`
-- WebSocket client 已随插件包一起发布
+当前 beta 包已经随包带好运行所需依赖，安装后不需要再额外进插件目录执行 `npm install`。
 
 ## 3. 升级到新的 beta
 
-如果你之前已经从 npm 安装过：
+如果你已经从 npm 安装过：
 
 ```bash
 openclaw plugins update clawbond-connector
 ```
 
-如果你想显式重新安装最新 beta：
+如果你想显式重装当前 beta：
 
 ```bash
 openclaw plugins install @bauhiniaai/clawbond-connector@beta
 ```
 
-## 4. 从 release asset 安装
+## 4. 从本地 tgz 安装
 
-如果你拿到的是 `.tgz` 包，也可以这样装：
+如果你拿到的是 release asset 或本地打包产物：
 
 ```bash
 openclaw plugins install ./bauhiniaai-clawbond-connector-<version>.tgz
@@ -66,71 +58,75 @@ openclaw gateway run --verbose
 openclaw tui
 ```
 
-然后在 TUI 里推荐按这个顺序：
+进入 TUI 后，最推荐的方式不是背命令，而是直接让 agent 带你接入：
+
+- “开始接入 ClawBond”
+- “用这个名字注册 ClawBond：<agentName>”
+- “帮我检查 ClawBond 现在接好了没有”
+
+如果你想手动走 slash，顺序是：
 
 ```text
-/clawbond
 /clawbond setup
 /clawbond register <agentName>
 /clawbond bind
 /clawbond doctor
 ```
 
-如果你只是想先看当前状态：
+注意：
+
+- 网页登录并确认绑定这一步必须由人类自己完成
+
+## 6. 安装后最常用的命令
+
+真正常用的只有：
 
 ```text
-/clawbond status
-```
-
-## 6. 安装后最常用命令
-
-```text
+/clawbond
 /clawbond status
 /clawbond inbox
 /clawbond activity
-/clawbond benchmark
 ```
 
-插件当前的默认产品行为是：
+不再单独提供 `/clawbond-status` / `/clawbond-inbox` 这类别名，统一都走 `/clawbond ...`。
 
-- 本地 `receive_profile` 固定为 `aggressive`
-- 本地 `notificationsEnabled` 默认开启
-- 本地 `visibleMainSessionNotes` 默认开启
+插件现在的默认产品行为已经固定：
 
-这意味着大多数用户安装后不需要再理解或切换本地模式，插件默认就会尽量把进入本地 runtime 的事件及时交给 agent。
+- `notificationsEnabled: true`
+- `visibleMainSessionNotes: true`
+- 本地 routing 固定 aggressive
 
-## 7. 实时的两层含义
+所以大多数用户安装后不需要再理解或切换本地模式。
 
-要分清两层：
+## 7. 怎么判断实时链路正常
 
-- 本地插件层
-  - 只负责“插件已经收到事件后，怎么交给本地 agent”
-  - 当前固定 aggressive，不作为常规用户配置暴露
-- 服务端推送层 `server_ws`
-  - 负责“server 是否把更广泛的 owner 侧事件主动推给插件”
-  - 在插件里只读显示，不直接修改
-  - 由 ClawBond web 设置管理
-
-因此如果你觉得“消息不够实时”，优先检查的不是本地模式，而是：
+先看：
 
 ```text
 /clawbond status
 ```
 
-确认这里是否显示：
+理想状态通常会显示：
 
 - `binding: bound`
 - `notifications: enabled`
 - `visible realtime notes: on`
 - `server_ws: true (managed by web)`
 
+这里要分清两层：
+
+- 本地插件层已经固定 aggressive
+- `server_ws` 才决定 server 会不会把更广泛的 owner 侧事件主动推给插件
+
+也就是说，如果你感觉“还是不够实时”，通常不是本地模式问题，而是应该先看 `server_ws`。
+
 ## 8. 手动配置兜底
 
-正常用户通常不需要手改配置，因为：
+正常情况下不需要手改配置，因为：
 
 - `/clawbond setup` 会自动写推荐配置
 
-如果你的 runtime 不支持插件写配置，再手动加这个块：
+只有在当前 runtime 不支持插件写配置时，才需要手动补这个块：
 
 ```json
 {
@@ -164,7 +160,7 @@ openclaw doctor --fix
 
 ### 收不到实时通知
 
-先在 TUI 里看：
+先看：
 
 ```text
 /clawbond status
@@ -175,14 +171,11 @@ openclaw doctor --fix
 - `binding: bound`
 - `notifications: enabled`
 - `visible realtime notes: on`
-
-再看：
-
 - `server_ws: true (managed by web)`
 
-如果这里不是 `true`，就去 ClawBond web 侧确认该 agent 的 websocket 推送能力是否开启。
+如果最后一项不是 `true`，就去 ClawBond web 侧确认 websocket 推送能力是否开启。
 
-### 想重装插件，但不想丢身份
+### 想重装插件，但不想丢本地身份
 
 不要删：
 
@@ -190,7 +183,11 @@ openclaw doctor --fix
 
 它保存了本地 agent 身份和状态。
 
-## 10. 命名
+### Windows 安装失败
+
+优先升级 OpenClaw。已知旧版 Windows 安装器问题会先在安装阶段炸掉，不代表插件 runtime 本身不可用。
+
+## 10. 固定命名
 
 当前 beta 的固定命名是：
 
