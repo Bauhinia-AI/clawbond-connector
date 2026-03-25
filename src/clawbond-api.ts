@@ -1,11 +1,10 @@
+import { buildStoredCredentialsFromAccount, withRuntimeToken } from "./account-utils.ts";
 import { BootstrapClient } from "./bootstrap-client.ts";
 import { resolveAccount } from "./config.ts";
 import { CredentialStore } from "./credential-store.ts";
+import { readResponseText } from "./shared-utils.ts";
 import { ToolInputError } from "./tooling.ts";
-import type {
-  ClawBondAccount,
-  ClawBondStoredCredentials
-} from "./types.ts";
+import type { ClawBondAccount } from "./types.ts";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 interface ApiEnvelope<T> {
@@ -28,23 +27,6 @@ interface RequestOptions {
   json?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   signal?: AbortSignal;
-}
-
-function isAbortSignal(value: unknown): value is AbortSignal {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "aborted" in (value as Record<string, unknown>) &&
-    typeof (value as { addEventListener?: unknown }).addEventListener === "function"
-  );
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 export class ClawBondHttpError extends Error {
@@ -498,7 +480,7 @@ export class ClawBondServerApiClient extends ClawBondApiClient {
 }
 
 export class ClawBondToolSession {
-  public readonly account: ClawBondAccount;
+  public account: ClawBondAccount;
   public readonly server: ClawBondServerApiClient;
   private readonly store: CredentialStore;
   private readonly bootstrapClient: BootstrapClient;
@@ -556,7 +538,7 @@ export class ClawBondToolSession {
     }
 
     const token = await this.bootstrapClient.refreshAgentToken(agentId, secretKey);
-    applyRuntimeToken(this.account, token);
+    this.account = withRuntimeToken(this.account, token);
     await persistAccountCredentials(this.store, this.account);
     return token;
   }
@@ -575,14 +557,6 @@ function buildHeaders(token?: string, includeJsonContentType = false): HeadersIn
   return headers;
 }
 
-async function readResponseText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
 function shouldRetryWithRefresh(account: ClawBondAccount, error: unknown): boolean {
   if (!account.agentId.trim() || !account.secretKey.trim()) {
     return false;
@@ -595,40 +569,9 @@ function shouldRetryWithRefresh(account: ClawBondAccount, error: unknown): boole
   return /\b401\b/.test(error instanceof Error ? error.message : String(error));
 }
 
-function applyRuntimeToken(account: ClawBondAccount, accessToken: string) {
-  const previousRuntimeToken = account.runtimeToken.trim();
-  const hasCustomNotificationToken =
-    account.notificationAuthToken.trim() &&
-    account.notificationAuthToken.trim() !== previousRuntimeToken;
-
-  account.runtimeToken = accessToken.trim();
-
-  if (!hasCustomNotificationToken) {
-    account.notificationAuthToken = account.runtimeToken;
-  }
-}
-
 async function persistAccountCredentials(store: CredentialStore, account: ClawBondAccount) {
-  const credentials: ClawBondStoredCredentials = {
-    platform_base_url: account.apiBaseUrl || account.serverUrl,
-    social_base_url: account.socialBaseUrl || undefined,
-    agent_access_token: account.runtimeToken.trim(),
-    agent_id: account.agentId.trim(),
-    agent_name: account.agentName.trim(),
-    secret_key: account.secretKey.trim(),
-    bind_code: account.bindCode.trim() || undefined,
-    owner_user_id: account.ownerUserId.trim() || undefined,
-    binding_status: account.bindingStatus === "bound" ? "bound" : "pending",
-    invite_web_base_url: account.inviteWebBaseUrl || undefined
-  };
-
-  if (
-    !credentials.platform_base_url ||
-    !credentials.agent_access_token ||
-    !credentials.agent_id ||
-    !credentials.agent_name ||
-    !credentials.secret_key
-  ) {
+  const credentials = buildStoredCredentialsFromAccount(account);
+  if (!credentials) {
     return;
   }
 

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveStateRoot } from "./credential-store.ts";
+import { sanitizeFileSegment } from "./shared-utils.ts";
 import type {
   ClawBondDeliveryPath,
   ClawBondInboxHandledBy,
@@ -377,7 +378,9 @@ export class ClawBondInboxStore {
   private async writeItems(accountId: string, items: ClawBondPendingInboxItem[]): Promise<void> {
     const filePath = this.getFilePath(accountId);
     await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, `${JSON.stringify(trimItems(items), null, 2)}\n`, "utf-8");
+    const tempPath = `${filePath}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(trimItems(items), null, 2)}\n`, "utf-8");
+    await rename(tempPath, filePath);
   }
 
   private getFilePath(accountId: string): string {
@@ -457,9 +460,20 @@ function trimItems(items: ClawBondPendingInboxItem[]): ClawBondPendingInboxItem[
   }
 
   const pending = items.filter((item) => item.status === "pending");
-  const handled = items.filter((item) => item.status === "handled");
-  const remaining = Math.max(0, MAX_STORED_ITEMS - pending.length);
-  return [...pending, ...handled.slice(-remaining)];
+  if (pending.length >= MAX_STORED_ITEMS) {
+    const keptPendingIds = new Set(pending.slice(-MAX_STORED_ITEMS).map((item) => item.id));
+    return items.filter((item) => keptPendingIds.has(item.id));
+  }
+
+  const handledBudget = MAX_STORED_ITEMS - pending.length;
+  const keptIds = new Set([
+    ...pending.map((item) => item.id),
+    ...items
+      .filter((item) => item.status === "handled")
+      .slice(-handledBudget)
+      .map((item) => item.id)
+  ]);
+  return items.filter((item) => keptIds.has(item.id));
 }
 
 function applyHandledUpdate(
@@ -624,7 +638,7 @@ function normalizeReceiveMode(
     case "notification":
     case "connection_request":
     case "connection_request_response":
-      return "wake_only";
+      return "inject_main";
     case "message":
     default:
       return "inject_main";
@@ -676,8 +690,4 @@ function normalizeOptionalString(value: unknown): string {
 
 function normalizePositiveInteger(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
-}
-
-function sanitizeFileSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "-") || "default";
 }

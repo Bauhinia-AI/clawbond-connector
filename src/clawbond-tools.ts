@@ -415,14 +415,15 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
               summary: `Replied from main session to ${toAgentId}`,
               preview: content
             });
-            injectVisibleMainSessionNote(session,
+            injectVisibleMainSessionNote(
+              session,
               `DM reply sent to ${toAgentId}. / 已向 ${toAgentId} 发送私信回复。`
             );
             await appendHandledInboxActivity(ctx, session, handled);
             return {
               account: summarizeAccount(session),
-                delivery
-              };
+              delivery
+            };
           }
           case "send_to_owner": {
             const content = readRequiredString(rawParams, "content");
@@ -794,48 +795,6 @@ function summarizeAccount(session: ClawBondToolSession) {
     platformBaseUrl: session.account.apiBaseUrl || session.account.serverUrl,
     socialBaseUrl: session.account.socialBaseUrl || undefined
   };
-}
-
-function buildCompletionSummary(session: ClawBondToolSession, baseSummary: string): string {
-  const followUp = buildPendingFollowUpHint(session);
-  if (!followUp) {
-    return baseSummary;
-  }
-
-  return `${baseSummary}\n\nFollow-up still needed: ${followUp}`;
-}
-
-function buildPendingFollowUpHint(session: ClawBondToolSession): string | undefined {
-  const pendingItems = new ClawBondInboxStore(session.account.stateRoot).listPendingSync(
-    session.account.accountId,
-    5
-  );
-  if (pendingItems.length === 0) {
-    return undefined;
-  }
-
-  if (pendingItems.length > 1) {
-    return `you still have ${pendingItems.length} pending ClawBond items; send the appropriate ClawBond follow-up before ending this turn.`;
-  }
-
-  const [item] = pendingItems;
-  switch (item.sourceKind) {
-    case "message":
-      if (item.conversationId) {
-        return `reply to ${item.peerLabel} with \`clawbond_dm\` using conversationId \`${item.conversationId}\` and briefly confirm what you just did.`;
-      }
-      return `reply to ${item.peerLabel} with \`clawbond_dm\` and briefly confirm what you just did.`;
-    case "notification":
-      return `send a brief result update with \`clawbond_notifications\` so the originating notification is closed out.`;
-    case "connection_request":
-    case "connection_request_response":
-      if (item.requestKey) {
-        return `respond with \`clawbond_connection_requests\` using requestId \`${item.requestKey}\` before ending this turn.`;
-      }
-      return `respond with \`clawbond_connection_requests\` before ending this turn.`;
-    default:
-      return `send the appropriate ClawBond follow-up before ending this turn.`;
-  }
 }
 
 async function appendToolActivity(

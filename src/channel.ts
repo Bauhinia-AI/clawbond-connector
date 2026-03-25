@@ -8,6 +8,7 @@ import {
   type OpenClawConfig
 } from "openclaw/plugin-sdk";
 
+import { buildStoredCredentialsFromAccount, withRuntimeToken } from "./account-utils.ts";
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { BootstrapClient } from "./bootstrap-client.ts";
 import { ClawBondServerApiClient } from "./clawbond-api.ts";
@@ -44,6 +45,7 @@ const DEFAULT_ACCOUNT_ID = "default";
 const MAIN_SESSION_KEY = "agent:main:main";
 const MAIN_WAKE_DEBOUNCE_MS = 400;
 const DM_MERGED_WAKE_COOLDOWN_MS = 90_000;
+const MAX_BIND_WAIT_MS = 12 * 60 * 60 * 1000;
 
 const runtimeClients = new Map<string, PlatformClient>();
 const pendingMainWakeTimers = new Map<string, NodeJS.Timeout>();
@@ -222,7 +224,7 @@ export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
                 activeAccount.agentId,
                 activeAccount.secretKey
               );
-              applyRuntimeToken(activeAccount, nextToken);
+              activeAccount = withRuntimeToken(activeAccount, nextToken);
               await persistRuntimeCredentials(store, activeAccount);
               logInfo(ctx, "[clawbond-connector] refreshed runtime token", {
                 agentId: activeAccount.agentId,
@@ -262,7 +264,7 @@ export const clawbondPlugin: ChannelPlugin<ClawBondAccount> = {
 
           const sessionExit = await runConnectedSession({
             ctx,
-            account: activeAccount,
+            getAccount: () => activeAccount,
             store,
             bootstrapClient,
             resolveRuntimeToken: async (reason) =>
@@ -476,9 +478,9 @@ async function bootstrapAccount(
 
       bindStatus = await waitForBoundStatus({
         abortSignal: ctx.abortSignal,
-        bootstrapClient,
-        accessToken: state.accessToken,
+        loadBindStatus: () => bootstrapClient.getBindStatus(state.accessToken),
         pollIntervalMs: account.bindStatusPollIntervalMs,
+        timeoutMs: MAX_BIND_WAIT_MS,
         onPending: () => {
           setAccountStatus(ctx, account, {
             phase: "waiting_for_bind",
@@ -541,15 +543,20 @@ async function bootstrapAccount(
 
 async function waitForBoundStatus(params: {
   abortSignal: AbortSignal;
-  bootstrapClient: BootstrapClient;
-  accessToken: string;
+  loadBindStatus: () => Promise<ClawBondAgentBindStatus>;
   pollIntervalMs: number;
+  timeoutMs: number;
   onPending?: () => void;
 }) {
+  const deadline = Date.now() + Math.max(params.timeoutMs, params.pollIntervalMs);
+
   while (true) {
     throwIfAborted(params.abortSignal);
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for the human to finish ClawBond binding");
+    }
 
-    const status = await params.bootstrapClient.getBindStatus(params.accessToken);
+    const status = await params.loadBindStatus();
     if (status.bound) {
       return status;
     }
@@ -602,7 +609,7 @@ function applyBootstrapState(account: ClawBondAccount, state: BootstrapState): C
 
 async function runConnectedSession(params: {
   ctx: StartAccountContext;
-  account: ClawBondAccount;
+  getAccount: () => ClawBondAccount;
   store: CredentialStore;
   bootstrapClient: BootstrapClient;
   resolveRuntimeToken: (reason: "initial_connect" | "reconnect") => Promise<string>;
@@ -614,6 +621,7 @@ async function runConnectedSession(params: {
   loadProfile: () => Promise<ClawBondAgentSelfProfile>;
   resolvePeerLabel: (message: ClawBondInvokeMessage) => Promise<string | null>;
 }): Promise<ConnectedSessionExit> {
+  const getAccount = params.getAccount;
   let client: PlatformClient | null = null;
   let notificationClient: NotificationClient | null = null;
   let bindingMonitor:
@@ -629,7 +637,7 @@ async function runConnectedSession(params: {
     if (!dmCatchUpPromise) {
       dmCatchUpPromise = syncRuntimeDmCatchUp({
         ctx: params.ctx,
-        account: params.account,
+        getAccount,
         store: params.store,
         pollMessages: params.pollMessages,
         resolvePeerLabel: params.resolvePeerLabel,
@@ -643,28 +651,32 @@ async function runConnectedSession(params: {
   };
 
   try {
-    client = new PlatformClient(params.account, {
+    client = new PlatformClient(getAccount(), {
       resolveRuntimeToken: params.resolveRuntimeToken
     });
-    notificationClient = new NotificationClient(params.account);
+    notificationClient = new NotificationClient(getAccount(), {
+      resolveAuthToken: () => getAccount().notificationAuthToken
+    });
 
     client.on("log", (entry) => {
       logInfo(params.ctx, "[clawbond-connector] platform client", entry);
     });
 
     client.on("invoke", (message: ClawBondInvokeMessage) => {
-      void dispatchPlatformInvoke(params.ctx, params.account, message, params.resolvePeerLabel).catch((error) => {
-        logError(params.ctx, "[clawbond-connector] inbound dispatch crashed", {
-          error: stringifyError(error),
-          requestId: message.requestId
-        });
-      });
+      void dispatchPlatformInvoke(params.ctx, getAccount(), message, params.resolvePeerLabel).catch(
+        (error) => {
+          logError(params.ctx, "[clawbond-connector] inbound dispatch crashed", {
+            error: stringifyError(error),
+            requestId: message.requestId
+          });
+        }
+      );
     });
 
     notificationClient.setConsumer(async (notification, meta) => {
       await dispatchPlatformInvoke(
         params.ctx,
-        params.account,
+        getAccount(),
         notificationClient!.buildInvokeMessageWithPath(notification, meta.deliveryPath),
         params.resolvePeerLabel
       );
@@ -702,23 +714,23 @@ async function runConnectedSession(params: {
     });
 
     client.on("reply", () => {
-      markOutboundSuccess(params.ctx, params.account);
+      markOutboundSuccess(params.ctx, getAccount());
     });
 
     notificationClient.on("log", (entry) => {
       logInfo(params.ctx, "[clawbond-connector] notification client", entry);
     });
 
-    setAccountStatus(params.ctx, params.account, {
+    setAccountStatus(params.ctx, getAccount(), {
       phase: "connecting",
       busy: false,
       connected: false,
-      bindingStatus: params.account.bindingStatus,
+      bindingStatus: getAccount().bindingStatus,
       message: "Connecting to ClawBond realtime gateway"
     });
 
     await client.start();
-    runtimeClients.set(params.account.accountId, client);
+    runtimeClients.set(getAccount().accountId, client);
     await notificationClient.start({ enablePollingFallback: false });
     try {
       await runRuntimeDmCatchUp("initial_start");
@@ -728,11 +740,11 @@ async function runConnectedSession(params: {
       });
     }
 
-    setAccountStatus(params.ctx, params.account, {
+    setAccountStatus(params.ctx, getAccount(), {
       phase: "connected",
       busy: false,
       connected: true,
-      bindingStatus: params.account.bindingStatus,
+      bindingStatus: getAccount().bindingStatus,
       lastConnectedAt: Date.now(),
       lastError: null,
       message: "Connected to ClawBond"
@@ -740,7 +752,7 @@ async function runConnectedSession(params: {
 
     bindingMonitor = createRuntimeBindingMonitor({
       ctx: params.ctx,
-      account: params.account,
+      getAccount,
       store: params.store,
       bootstrapClient: params.bootstrapClient,
       loadBindStatus: params.loadBindStatus,
@@ -763,9 +775,9 @@ async function runConnectedSession(params: {
       kind: "aborted"
     };
   } finally {
-    clearScheduledMainSessionWork(params.account.accountId);
+    clearScheduledMainSessionWork(getAccount().accountId);
     bindingMonitor?.stop();
-    runtimeClients.delete(params.account.accountId);
+    runtimeClients.delete(getAccount().accountId);
     await notificationClient?.stop().catch(() => undefined);
     await client?.stop().catch(() => undefined);
   }
@@ -773,7 +785,7 @@ async function runConnectedSession(params: {
 
 function createRuntimeBindingMonitor(params: {
   ctx: StartAccountContext;
-  account: ClawBondAccount;
+  getAccount: () => ClawBondAccount;
   store: CredentialStore;
   bootstrapClient: BootstrapClient;
   loadBindStatus: () => Promise<ClawBondAgentBindStatus>;
@@ -786,7 +798,7 @@ function createRuntimeBindingMonitor(params: {
     completion: (async () => {
       while (true) {
         try {
-          await sleepWithAbort(signal, params.account.bindStatusPollIntervalMs);
+          await sleepWithAbort(signal, params.getAccount().bindStatusPollIntervalMs);
         } catch (error) {
           if (isAbortError(error)) {
             return null;
@@ -800,9 +812,10 @@ function createRuntimeBindingMonitor(params: {
         try {
           bindStatus = await params.loadBindStatus();
         } catch (error) {
+          const account = params.getAccount();
           logWarn(params.ctx, "[clawbond-connector] runtime bind-status check failed", {
             error: stringifyError(error),
-            agentId: params.account.agentId
+            agentId: account.agentId
           });
           continue;
         }
@@ -815,13 +828,14 @@ function createRuntimeBindingMonitor(params: {
         try {
           profile = await params.loadProfile();
         } catch (error) {
+          const account = params.getAccount();
           logWarn(params.ctx, "[clawbond-connector] failed to refresh agent profile after unbind", {
             error: stringifyError(error),
-            agentId: params.account.agentId
+            agentId: account.agentId
           });
         }
 
-        const recoveredAccount = createPendingBindingAccount(params.account, profile);
+        const recoveredAccount = createPendingBindingAccount(params.getAccount(), profile);
         await persistRuntimeCredentials(params.store, recoveredAccount);
 
         setAccountStatus(params.ctx, recoveredAccount, {
@@ -862,40 +876,13 @@ function shouldRetryWithTokenRefresh(account: ClawBondAccount, error: unknown): 
   return canRefreshRuntimeToken(account) && /\b401\b/.test(stringifyError(error));
 }
 
-function applyRuntimeToken(account: ClawBondAccount, accessToken: string) {
-  const previousRuntimeToken = account.runtimeToken.trim();
-  const hasCustomNotificationToken =
-    account.notificationAuthToken.trim() &&
-    account.notificationAuthToken.trim() !== previousRuntimeToken;
-  const nextRuntimeToken = accessToken.trim();
-
-  account.runtimeToken = nextRuntimeToken;
-
-  if (!hasCustomNotificationToken) {
-    account.notificationAuthToken = nextRuntimeToken;
-  }
-}
-
 async function persistRuntimeCredentials(store: CredentialStore, account: ClawBondAccount) {
-  const state = createBootstrapStateFromAccount(account);
-
-  if (!state.accessToken || !state.agentId || !state.agentName || !state.secretKey) {
+  const credentials = buildStoredCredentialsFromAccount(account);
+  if (!credentials) {
     return;
   }
 
-  await saveBootstrapCredentials(store, account, state);
-}
-
-function createBootstrapStateFromAccount(account: ClawBondAccount): BootstrapState {
-  return {
-    accessToken: account.runtimeToken.trim(),
-    agentId: account.agentId.trim(),
-    agentName: account.agentName.trim(),
-    secretKey: account.secretKey.trim(),
-    bindCode: account.bindCode.trim(),
-    ownerUserId: account.ownerUserId.trim() || undefined,
-    bindingStatus: account.bindingStatus === "bound" ? "bound" : "pending"
-  };
+  await store.save(account.accountId, credentials);
 }
 
 function createPendingBindingAccount(
@@ -931,7 +918,7 @@ async function dispatchPlatformInvoke(
   const peerLabel = await resolveDisplayPeerLabel(message, resolvePeerLabel);
   const peer = describeActivityPeer(message, peerLabel);
   const sessionKey = MAIN_SESSION_KEY;
-  const settings = new CredentialStore(account.stateRoot).loadUserSettingsSync(account.accountId);
+  const settings = await new CredentialStore(account.stateRoot).loadUserSettings(account.accountId);
   const receiveRouting = resolveInboundReceiveRouting(account, settings, message);
   const inboxStore = new ClawBondInboxStore(account.stateRoot);
   const sourceKind = message.sourceKind || "message";
@@ -1578,7 +1565,7 @@ async function recordMainWakeActivity(
 
 async function syncRuntimeDmCatchUp(params: {
   ctx: StartAccountContext;
-  account: ClawBondAccount;
+  getAccount: () => ClawBondAccount;
   store: CredentialStore;
   pollMessages: (after: string | undefined, limit: number) => Promise<{
     data: unknown[];
@@ -1587,8 +1574,8 @@ async function syncRuntimeDmCatchUp(params: {
   resolvePeerLabel: (message: ClawBondInvokeMessage) => Promise<string | null>;
   reason: "initial_start" | "reconnect";
 }) {
-  const accountId = params.account.accountId;
-  const syncState = params.store.loadSyncStateSync(accountId);
+  const accountId = params.getAccount().accountId;
+  const syncState = await params.store.loadSyncState(accountId);
   let cursor = syncState.last_seen_dm_cursor ?? undefined;
   let processed = 0;
   let pageCount = 0;
@@ -1601,10 +1588,11 @@ async function syncRuntimeDmCatchUp(params: {
     const nextCursor = readNextCursor(result.pagination);
 
     for (const message of messages) {
+      const account = params.getAccount();
       await dispatchPlatformInvoke(
         params.ctx,
-        params.account,
-        buildInvokeMessageFromPolledDm(params.account, message),
+        account,
+        buildInvokeMessageFromPolledDm(account, message),
         params.resolvePeerLabel
       );
       processed += 1;

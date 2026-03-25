@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveStateRoot } from "./credential-store.ts";
+import { sanitizeFileSegment } from "./shared-utils.ts";
 import type { ClawBondActivityEntry } from "./types.ts";
 
 const ACTIVITY_DIRNAME = "activity";
+const MAX_ACTIVITY_ENTRIES = 1000;
+const MAX_ACTIVITY_FILE_BYTES = 512 * 1024;
+const activityUpdateChains = new Map<string, Promise<unknown>>();
 
 export class ClawBondActivityStore {
   private readonly stateRoot: string;
@@ -28,8 +32,11 @@ export class ClawBondActivityStore {
     };
 
     const filePath = this.getFilePath(accountId);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await appendFile(filePath, `${JSON.stringify(normalized)}\n`, "utf-8");
+    await this.withAccountLock(accountId, async () => {
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await appendFile(filePath, `${JSON.stringify(normalized)}\n`, "utf-8");
+      await this.compactIfNeeded(filePath);
+    });
     return normalized;
   }
 
@@ -47,6 +54,57 @@ export class ClawBondActivityStore {
 
   private getFilePath(accountId: string): string {
     return path.join(this.stateRoot, ACTIVITY_DIRNAME, `${sanitizeFileSegment(accountId)}.jsonl`);
+  }
+
+  private async compactIfNeeded(filePath: string): Promise<void> {
+    let fileStat;
+    try {
+      fileStat = await stat(filePath);
+    } catch {
+      return;
+    }
+
+    if (fileStat.size <= MAX_ACTIVITY_FILE_BYTES) {
+      return;
+    }
+
+    const raw = await readFileText(filePath);
+    const entries = this.parseEntries(raw, 0);
+    if (entries.length <= MAX_ACTIVITY_ENTRIES && fileStat.size <= MAX_ACTIVITY_FILE_BYTES) {
+      return;
+    }
+
+    const compacted = entries
+      .slice(-MAX_ACTIVITY_ENTRIES)
+      .map((entry) => JSON.stringify(entry))
+      .join("\n");
+    const nextRaw = compacted ? `${compacted}\n` : "";
+    const tempPath = `${filePath}.tmp`;
+    await writeFile(tempPath, nextRaw, "utf-8");
+    await rename(tempPath, filePath);
+  }
+
+  private async withAccountLock<T>(accountId: string, job: () => Promise<T>): Promise<T> {
+    const key = `${this.stateRoot}::${accountId.trim() || "default"}`;
+    const previous = activityUpdateChains.get(key) ?? Promise.resolve();
+
+    let release: () => void = () => undefined;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.then(() => next);
+    activityUpdateChains.set(key, chain);
+
+    await previous;
+
+    try {
+      return await job();
+    } finally {
+      release();
+      if (activityUpdateChains.get(key) === chain) {
+        activityUpdateChains.delete(key);
+      }
+    }
   }
 
   private parseEntries(raw: string | null, limit: number): ClawBondActivityEntry[] {
@@ -102,10 +160,6 @@ function normalizeTimestamp(value: string | undefined): string {
   }
 
   return date.toISOString();
-}
-
-function sanitizeFileSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "-") || "default";
 }
 
 function isActivityEntry(value: unknown): value is ClawBondActivityEntry {

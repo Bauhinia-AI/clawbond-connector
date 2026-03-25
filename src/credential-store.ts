@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { sanitizeFileSegment } from "./shared-utils.ts";
 import type {
   ClawBondReceiveProfile,
   ClawBondRoutingMatrix,
@@ -47,17 +48,26 @@ export class CredentialStore {
     return stored ? this.getAgentDir(stored.agentKey) : null;
   }
 
+  public async getAgentHome(accountId: string): Promise<string | null> {
+    const stored = await this.load(accountId);
+    return stored ? this.getAgentDir(stored.agentKey) : null;
+  }
+
   public loadUserSettingsSync(accountId: string): ClawBondUserSettings {
     return normalizeUserSettings(
       this.readAgentJsonSync(accountId, "user-settings.json")
     );
   }
 
+  public async loadUserSettings(accountId: string): Promise<ClawBondUserSettings> {
+    return normalizeUserSettings(await this.readAgentJson(accountId, "user-settings.json"));
+  }
+
   public async saveUserSettings(
     accountId: string,
     settings: ClawBondUserSettings
   ): Promise<boolean> {
-    const agentHome = this.getAgentHomeSync(accountId);
+    const agentHome = await this.getAgentHome(accountId);
     if (!agentHome) {
       return false;
     }
@@ -75,8 +85,12 @@ export class CredentialStore {
     return normalizeSyncState(this.readAgentJsonSync(accountId, "state.json"));
   }
 
+  public async loadSyncState(accountId: string): Promise<ClawBondSyncState> {
+    return normalizeSyncState(await this.readAgentJson(accountId, "state.json"));
+  }
+
   public async saveSyncState(accountId: string, state: ClawBondSyncState): Promise<boolean> {
-    const agentHome = this.getAgentHomeSync(accountId);
+    const agentHome = await this.getAgentHome(accountId);
     if (!agentHome) {
       return false;
     }
@@ -100,6 +114,22 @@ export class CredentialStore {
     if (fallback) {
       this.writeAccountPointerSync(accountId, fallback.agentKey);
       this.writeActiveAgentPointerSync(fallback.agentKey);
+      return fallback;
+    }
+
+    return null;
+  }
+
+  public async load(accountId: string): Promise<ClawBondStoredAgent | null> {
+    const pointer = await this.readAccountPointer(accountId);
+    if (pointer) {
+      return await this.readAgent(pointer);
+    }
+
+    const fallback = await this.readSingleAgent();
+    if (fallback) {
+      await this.writeAccountPointer(accountId, fallback.agentKey);
+      await this.writeActiveAgentPointer(fallback.agentKey);
       return fallback;
     }
 
@@ -135,6 +165,11 @@ export class CredentialStore {
     } catch {
       return null;
     }
+  }
+
+  private async readAccountPointer(accountId: string): Promise<string | null> {
+    const raw = await readJsonFile<{ agent_key?: unknown }>(this.getPointerPath(accountId));
+    return typeof raw?.agent_key === "string" && raw.agent_key.trim() ? raw.agent_key.trim() : null;
   }
 
   private writeAccountPointerSync(accountId: string, agentKey: string) {
@@ -175,6 +210,22 @@ export class CredentialStore {
     return this.readAgentSync(entries[0]!.name);
   }
 
+  private async readSingleAgent(): Promise<ClawBondStoredAgent | null> {
+    const agentsDir = path.join(this.stateRoot, "agents");
+    try {
+      const entries = (await readdir(agentsDir, { withFileTypes: true })).filter((entry) =>
+        entry.isDirectory()
+      );
+      if (entries.length !== 1) {
+        return null;
+      }
+
+      return await this.readAgent(entries[0]!.name);
+    } catch {
+      return null;
+    }
+  }
+
   private readAgentSync(agentKey: string): ClawBondStoredAgent | null {
     const credentialsPath = path.join(this.getAgentDir(agentKey), "credentials.json");
     if (!existsSync(credentialsPath)) {
@@ -191,6 +242,17 @@ export class CredentialStore {
     } catch {
       return null;
     }
+  }
+
+  private async readAgent(agentKey: string): Promise<ClawBondStoredAgent | null> {
+    const raw = await readJsonFile<ClawBondStoredCredentials>(
+      path.join(this.getAgentDir(agentKey), "credentials.json")
+    );
+    if (!isStoredCredentials(raw)) {
+      return null;
+    }
+
+    return { agentKey, credentials: raw };
   }
 
   private getPointerPath(accountId: string): string {
@@ -221,6 +283,15 @@ export class CredentialStore {
     } catch {
       return null;
     }
+  }
+
+  private async readAgentJson(accountId: string, filename: string): Promise<unknown> {
+    const agentHome = await this.getAgentHome(accountId);
+    if (!agentHome) {
+      return null;
+    }
+
+    return await readJsonFile(path.join(agentHome, filename));
   }
 
   private async ensureAgentHomeScaffold(agentDir: string): Promise<void> {
@@ -255,10 +326,6 @@ export function buildAgentKey(agentName: string, agentId: string): string {
     .replace(/-{2,}/g, "-") || "agent";
   const suffix = agentId.slice(-6) || agentId;
   return `${slug}-${suffix}`;
-}
-
-function sanitizeFileSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "-") || "default";
 }
 
 function isStoredCredentials(value: unknown): value is ClawBondStoredCredentials {
@@ -315,10 +382,7 @@ export function normalizeUserSettings(value: unknown): ClawBondUserSettings {
     dmDeliveryPreference === "silent"
       ? dmDeliveryPreference
       : defaults.dm_delivery_preference;
-  const receiveProfile = normalizeReceiveProfile(
-    candidate.receive_profile,
-    normalizedDmDeliveryPreference
-  );
+  const receiveProfile = normalizeReceiveProfile(candidate.receive_profile);
 
   return {
     dm_delivery_preference: normalizedDmDeliveryPreference,
@@ -345,8 +409,7 @@ export function normalizeSyncState(value: unknown): ClawBondSyncState {
   };
 }
 
-export function buildRoutingMatrixForProfile(profile: ClawBondReceiveProfile): ClawBondRoutingMatrix {
-  void profile;
+export function buildRoutingMatrixForProfile(_profile: ClawBondReceiveProfile): ClawBondRoutingMatrix {
   return { ...DEFAULT_ROUTING_MATRIX };
 }
 
@@ -354,17 +417,6 @@ export function buildEffectiveRoutingMatrix(settings: ClawBondUserSettings): Cla
   return buildRoutingMatrixForProfile(settings.receive_profile);
 }
 
-export function deriveReceiveProfileFromLegacyDmPreference(
-  legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
-): ClawBondReceiveProfile {
-  void legacyDmPreference;
-  return "aggressive";
-}
-
-function normalizeReceiveProfile(
-  value: unknown,
-  legacyDmPreference: ClawBondUserSettings["dm_delivery_preference"]
-): ClawBondReceiveProfile {
-  void value;
-  return deriveReceiveProfileFromLegacyDmPreference(legacyDmPreference);
+function normalizeReceiveProfile(value: unknown): ClawBondReceiveProfile {
+  return value === "aggressive" ? "aggressive" : DEFAULT_USER_SETTINGS.receive_profile;
 }

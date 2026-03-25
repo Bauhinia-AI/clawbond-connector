@@ -6,6 +6,7 @@ import type {
   ClawBondInvokeMessage,
   ClawBondNotification
 } from "./types.ts";
+import { normalizeSenderType, readResponseText, readTrimmedString } from "./shared-utils.ts";
 
 interface NotificationConsumerMeta {
   deliveryPath: Extract<ClawBondDeliveryPath, "notification_realtime" | "notification_polling">;
@@ -25,9 +26,14 @@ interface NotificationClientStartOptions {
   enablePollingFallback?: boolean;
 }
 
+interface NotificationClientOptions {
+  resolveAuthToken?: () => string;
+}
+
 export class NotificationClient extends EventEmitter {
   private readonly account: ClawBondAccount;
   private readonly apiUrl: string;
+  private readonly resolveAuthToken: () => string;
   private stopped = false;
   private timer: NodeJS.Timeout | null = null;
   private polling = false;
@@ -36,10 +42,11 @@ export class NotificationClient extends EventEmitter {
   private pollingFallbackEnabled = false;
   private started = false;
 
-  public constructor(account: ClawBondAccount) {
+  public constructor(account: ClawBondAccount, options: NotificationClientOptions = {}) {
     super();
     this.account = account;
     this.apiUrl = account.notificationApiUrl.replace(/\/+$/, "");
+    this.resolveAuthToken = options.resolveAuthToken ?? (() => this.account.notificationAuthToken);
   }
 
   public setConsumer(consumer: NotificationConsumer | null) {
@@ -67,7 +74,7 @@ export class NotificationClient extends EventEmitter {
       return;
     }
 
-    if (!this.apiUrl || !this.account.notificationAuthToken) {
+    if (!this.apiUrl || !this.resolveAuthToken().trim()) {
       throw new Error("Notification sync requires notificationApiUrl and notificationAuthToken");
     }
 
@@ -131,7 +138,7 @@ export class NotificationClient extends EventEmitter {
 
     const response = await fetch(`${this.apiUrl}/api/agent/notifications/send`, {
       method: "POST",
-      headers: buildHeaders(this.account.notificationAuthToken, true),
+      headers: buildHeaders(this.resolveAuthToken(), true),
       body: JSON.stringify({ content: normalized })
     });
 
@@ -221,7 +228,7 @@ export class NotificationClient extends EventEmitter {
   private async listUnreadNotifications(): Promise<ClawBondNotification[]> {
     const response = await fetch(`${this.apiUrl}/api/agent/notifications?page=1&limit=20`, {
       method: "GET",
-      headers: buildHeaders(this.account.notificationAuthToken)
+      headers: buildHeaders(this.resolveAuthToken())
     });
 
     if (!response.ok) {
@@ -281,10 +288,10 @@ function normalizeNotification(value: unknown): ClawBondNotification | null {
   }
 
   const candidate = value as Record<string, unknown>;
-  const id = readString(candidate.id);
-  const senderId = readString(candidate.sender_id);
-  const content = readString(candidate.content);
-  const createdAt = readString(candidate.created_at);
+  const id = readTrimmedString(candidate.id);
+  const senderId = readTrimmedString(candidate.sender_id);
+  const content = readTrimmedString(candidate.content);
+  const createdAt = readTrimmedString(candidate.created_at);
 
   if (!id || !senderId || !content || !createdAt) {
     return null;
@@ -296,19 +303,11 @@ function normalizeNotification(value: unknown): ClawBondNotification | null {
     id,
     senderId,
     senderType,
-    notificationType: readString(candidate.noti_type),
+    notificationType: readTrimmedString(candidate.noti_type),
     content,
     isRead: candidate.is_read === true,
     createdAt
   };
-}
-
-function normalizeSenderType(value: unknown): "user" | "agent" | "system" {
-  if (value === "user" || value === "agent" || value === "system") {
-    return value;
-  }
-
-  return "system";
 }
 
 function formatNotificationForAgent(notification: ClawBondNotification): string {
@@ -334,21 +333,4 @@ function buildHeaders(token: string, includeJsonContentType = false): HeadersIni
     : {
         Authorization: `Bearer ${token}`
       };
-}
-
-async function readResponseText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
-function readString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim();
-  return normalized || undefined;
 }

@@ -1,4 +1,4 @@
-const mainWakeQueues = new Map();
+const mainWakeQueues: Map<string, string[][]> = new Map();
 
 export function enqueueClawBondMainWake(accountId: string, itemIds: string[]) {
   const normalizedAccountId = accountId.trim();

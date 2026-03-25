@@ -8,6 +8,7 @@ import {
   normalizeStructuredMessagePrefix,
   normalizeTrustedSenderAgentIds
 } from "./message-envelope.ts";
+import { readTrimmedStringOrEmpty } from "./shared-utils.ts";
 
 const DEFAULT_NOTIFICATION_POLL_INTERVAL_MS = 10000;
 const MIN_NOTIFICATION_POLL_INTERVAL_MS = 1000;
@@ -19,7 +20,7 @@ const MAX_BIND_STATUS_POLL_INTERVAL_MS = 60000;
 export function listAccountIds(cfg: { channels?: Record<string, unknown> }): string[] {
   const config = getClawBondConfig(cfg);
   const explicitIds = Object.keys(config.accounts ?? {});
-  const stateRoot = resolveStateRoot(readString(config.stateRoot));
+  const stateRoot = resolveStateRoot(readTrimmedStringOrEmpty(config.stateRoot));
   const storedDefault = new CredentialStore(stateRoot).loadSync("default");
   const defaultServerUrl = (
     config.serverUrl ??
@@ -49,7 +50,7 @@ export function resolveAccount(
   const config = getClawBondConfig(cfg);
   const resolvedAccountId = resolveConfiguredAccountId(cfg, accountId);
   const scoped = config.accounts?.[resolvedAccountId] ?? {};
-  const stateRoot = resolveStateRoot(readString(scoped.stateRoot ?? config.stateRoot));
+  const stateRoot = resolveStateRoot(readTrimmedStringOrEmpty(scoped.stateRoot ?? config.stateRoot));
   const stored = new CredentialStore(stateRoot).loadSync(resolvedAccountId);
 
   const serverUrl = (
@@ -156,10 +157,10 @@ export function resolveAccount(
     runtimeToken,
     agentId,
     agentName,
-    agentPersona: readString(scoped.agentPersona ?? config.agentPersona),
-    agentBio: readString(scoped.agentBio ?? config.agentBio),
+    agentPersona: readTrimmedStringOrEmpty(scoped.agentPersona ?? config.agentPersona),
+    agentBio: readTrimmedStringOrEmpty(scoped.agentBio ?? config.agentBio),
     agentTags: readStringArray(scoped.agentTags ?? config.agentTags),
-    agentLanguage: readString(scoped.agentLanguage ?? config.agentLanguage),
+    agentLanguage: readTrimmedStringOrEmpty(scoped.agentLanguage ?? config.agentLanguage),
     secretKey,
     bindCode,
     ownerUserId,
@@ -178,7 +179,7 @@ export function resolveAccount(
 }
 
 export function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): string {
-  const explicit = readString(value).trim().replace(/\/+$/, "");
+  const explicit = readTrimmedStringOrEmpty(value).replace(/\/+$/, "");
   if (explicit) {
     return explicit;
   }
@@ -326,14 +327,6 @@ function hasBootstrapConfig(config: ClawBondPluginConfig): boolean {
   return Boolean(
     config.agentId?.trim() && (config.secretKey?.trim() || config.runtimeToken?.trim())
   );
-}
-
-function readString(value: unknown): string {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim();
 }
 
 function readStringArray(value: unknown): string[] {

@@ -5,6 +5,7 @@ import { ClawBondHttpError, ClawBondToolSession } from "./clawbond-api.ts";
 import { listAccountIds } from "./config.ts";
 import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
+import { normalizeSenderType, readTrimmedStringOrEmpty } from "./shared-utils.ts";
 import type {
   ClawBondActivityEntry,
   ClawBondActivityEvent,
@@ -136,11 +137,12 @@ export async function loadClawBondInboxDigest(
     return null;
   }
 
-  const settings = new CredentialStore(session.account.stateRoot).loadUserSettingsSync(
-    session.account.accountId
-  );
+  const store = new CredentialStore(session.account.stateRoot);
+  const [settings, state] = await Promise.all([
+    store.loadUserSettings(session.account.accountId),
+    store.loadSyncState(session.account.accountId)
+  ]);
   const routingMatrix = buildEffectiveRoutingMatrix(settings);
-  const state = new CredentialStore(session.account.stateRoot).loadSyncStateSync(session.account.accountId);
 
   return session.withAgentToken("clawbond_inbox_digest", async (token) => {
     const notificationCountData = await settleAssistCall(
@@ -692,7 +694,7 @@ function normalizeNotifications(items: unknown): ClawBondNotification[] {
     }
 
     const candidate = item as Record<string, unknown>;
-    const id = readString(candidate.id);
+    const id = readTrimmedStringOrEmpty(candidate.id);
     if (!id) {
       return [];
     }
@@ -700,11 +702,11 @@ function normalizeNotifications(items: unknown): ClawBondNotification[] {
     return [
       {
         id,
-        senderId: readString(candidate.sender_id ?? candidate.senderId) || "unknown",
+        senderId: readTrimmedStringOrEmpty(candidate.sender_id ?? candidate.senderId) || "unknown",
         senderType: normalizeNotificationSenderType(candidate.sender_type ?? candidate.senderType),
-        content: readString(candidate.content),
+        content: readTrimmedStringOrEmpty(candidate.content),
         isRead: readBoolean(candidate.is_read ?? candidate.isRead),
-        createdAt: readString(candidate.created_at ?? candidate.createdAt)
+        createdAt: readTrimmedStringOrEmpty(candidate.created_at ?? candidate.createdAt)
       }
     ];
   });
@@ -721,7 +723,7 @@ function normalizeDmMessages(items: unknown): ClawBondUnreadDmPreview[] {
     }
 
     const candidate = item as Record<string, unknown>;
-    const id = readString(candidate.id);
+    const id = readTrimmedStringOrEmpty(candidate.id);
     if (!id) {
       return [];
     }
@@ -729,11 +731,11 @@ function normalizeDmMessages(items: unknown): ClawBondUnreadDmPreview[] {
     return [
       {
         id,
-        conversationId: readString(candidate.conversation_id ?? candidate.conversationId),
-        senderId: readString(candidate.sender_id ?? candidate.senderId),
-        senderName: readString(candidate.sender_name ?? candidate.senderName),
-        content: readString(candidate.content),
-        createdAt: readString(candidate.created_at ?? candidate.createdAt)
+        conversationId: readTrimmedStringOrEmpty(candidate.conversation_id ?? candidate.conversationId),
+        senderId: readTrimmedStringOrEmpty(candidate.sender_id ?? candidate.senderId),
+        senderName: readTrimmedStringOrEmpty(candidate.sender_name ?? candidate.senderName),
+        content: readTrimmedStringOrEmpty(candidate.content),
+        createdAt: readTrimmedStringOrEmpty(candidate.created_at ?? candidate.createdAt)
       }
     ];
   });
@@ -750,7 +752,7 @@ function normalizeConnectionRequests(items: unknown): ClawBondPendingConnectionR
     }
 
     const candidate = item as Record<string, unknown>;
-    const id = readString(candidate.id);
+    const id = readTrimmedStringOrEmpty(candidate.id);
     if (!id) {
       return [];
     }
@@ -758,12 +760,12 @@ function normalizeConnectionRequests(items: unknown): ClawBondPendingConnectionR
     return [
       {
         id,
-        conversationId: readString(candidate.conversation_id ?? candidate.conversationId),
-        requesterId: readString(candidate.requester_id ?? candidate.requesterId),
-        responderId: readString(candidate.responder_id ?? candidate.responderId),
-        status: readString(candidate.status),
-        message: readString(candidate.message),
-        createdAt: readString(candidate.created_at ?? candidate.createdAt)
+        conversationId: readTrimmedStringOrEmpty(candidate.conversation_id ?? candidate.conversationId),
+        requesterId: readTrimmedStringOrEmpty(candidate.requester_id ?? candidate.requesterId),
+        responderId: readTrimmedStringOrEmpty(candidate.responder_id ?? candidate.responderId),
+        status: readTrimmedStringOrEmpty(candidate.status),
+        message: readTrimmedStringOrEmpty(candidate.message),
+        createdAt: readTrimmedStringOrEmpty(candidate.created_at ?? candidate.createdAt)
       }
     ];
   });
@@ -794,16 +796,12 @@ function truncateInline(value: string, limit: number): string {
   return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 1))}...` : normalized;
 }
 
-function readString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function readBoolean(value: unknown): boolean {
   return value === true;
 }
 
 function normalizeNotificationSenderType(value: unknown): ClawBondNotification["senderType"] {
-  return value === "user" || value === "agent" || value === "system" ? value : "system";
+  return normalizeSenderType(value);
 }
 
 export function formatStatusSnapshotForCommand(

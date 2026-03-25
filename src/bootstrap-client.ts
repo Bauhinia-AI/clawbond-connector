@@ -3,6 +3,7 @@ import type {
   ClawBondAgentRegistration,
   ClawBondAgentSelfProfile
 } from "./types.ts";
+import { readResponseText, readTrimmedString } from "./shared-utils.ts";
 
 interface ApiEnvelope<T> {
   code?: number;
@@ -58,10 +59,10 @@ export class BootstrapClient {
       body: JSON.stringify(cleanRegisterPayload(payload))
     });
 
-    const accessToken = readNonEmptyString(data.access_token);
-    const agentId = readNonEmptyString(data.agent_id);
-    const secretKey = readNonEmptyString(data.secret_key);
-    const bindCode = readNonEmptyString(data.bind_code);
+    const accessToken = readTrimmedString(data.access_token);
+    const agentId = readTrimmedString(data.agent_id);
+    const secretKey = readTrimmedString(data.secret_key);
+    const bindCode = readTrimmedString(data.bind_code);
 
     if (!accessToken || !agentId || !secretKey || !bindCode) {
       throw new Error("Agent registration response is missing required fields");
@@ -87,7 +88,7 @@ export class BootstrapClient {
       })
     });
 
-    const accessToken = readNonEmptyString(data.access_token);
+    const accessToken = readTrimmedString(data.access_token);
     if (!accessToken) {
       throw new Error("Agent refresh response is missing access_token");
     }
@@ -112,8 +113,8 @@ export class BootstrapClient {
 
     return {
       bound: data.bound === true,
-      userId: readNonEmptyString(data.user_id),
-      username: readNonEmptyString(data.username)
+      userId: readTrimmedString(data.user_id),
+      username: readTrimmedString(data.username)
     };
   }
 
@@ -125,8 +126,8 @@ export class BootstrapClient {
 
     return {
       bound: data.bound === true,
-      userId: readNonEmptyString(data.user_id),
-      username: readNonEmptyString(data.username)
+      userId: readTrimmedString(data.user_id),
+      username: readTrimmedString(data.username)
     };
   }
 
@@ -136,8 +137,8 @@ export class BootstrapClient {
       headers: buildAgentHeaders(accessToken)
     });
 
-    const id = readNonEmptyString(data.id);
-    const name = readNonEmptyString(data.name);
+    const id = readTrimmedString(data.id);
+    const name = readTrimmedString(data.name);
 
     if (!id || !name) {
       throw new Error("Agent profile response is missing id or name");
@@ -146,8 +147,8 @@ export class BootstrapClient {
     return {
       id,
       name,
-      userId: readNonEmptyString(data.user_id),
-      bindCode: readNonEmptyString(data.bind_code)
+      userId: readTrimmedString(data.user_id),
+      bindCode: readTrimmedString(data.bind_code)
     };
   }
 
@@ -210,21 +211,4 @@ function cleanRegisterPayload(payload: AgentRegisterPayload): AgentRegisterPaylo
   }
 
   return next;
-}
-
-async function readResponseText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim();
-  return normalized || undefined;
 }

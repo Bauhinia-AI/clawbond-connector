@@ -116,14 +116,6 @@ export function createClawBondCommands(
   ];
 }
 
-function normalizeCommandArg(value: string | undefined): string | null {
-  if (!value?.trim()) {
-    return null;
-  }
-
-  return value.trim();
-}
-
 function loadCommandConfig(
   api: Pick<OpenClawPluginApi, "config"> & { runtime?: OpenClawPluginApi["runtime"] }
 ) {

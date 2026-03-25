@@ -3,6 +3,7 @@ import type {
   ClawBondPlatformSocketMessageInbound,
   ClawBondStructuredMessageEnvelope
 } from "./types.ts";
+import { readTrimmedString } from "./shared-utils.ts";
 
 export const DEFAULT_STRUCTURED_MESSAGE_PREFIX = "[CLAWBOND_EVENT]";
 const MAX_PAYLOAD_PREVIEW_CHARS = 4000;
@@ -99,8 +100,8 @@ export function parseStructuredMessageEnvelope(
 
   const candidate = parsed as Record<string, unknown>;
   const kind =
-    readNonEmptyString(candidate.type) ??
-    readNonEmptyString(candidate.kind) ??
+    readTrimmedString(candidate.type) ??
+    readTrimmedString(candidate.kind) ??
     "platform.message";
 
   return {
@@ -109,10 +110,10 @@ export function parseStructuredMessageEnvelope(
       typeof candidate.schema === "number" && Number.isFinite(candidate.schema)
         ? candidate.schema
         : undefined,
-    taskId: readNonEmptyString(candidate.taskId),
-    title: readNonEmptyString(candidate.title),
-    summary: readNonEmptyString(candidate.summary),
-    body: readNonEmptyString(candidate.body),
+    taskId: readTrimmedString(candidate.taskId),
+    title: readTrimmedString(candidate.title),
+    summary: readTrimmedString(candidate.summary),
+    body: readTrimmedString(candidate.body),
     payload: candidate.payload
   };
 }
@@ -176,13 +177,4 @@ function formatPayloadPreview(payload: unknown): string | null {
     const fallback = String(payload).trim();
     return fallback || null;
   }
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim();
-  return normalized || undefined;
 }

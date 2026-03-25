@@ -17,6 +17,7 @@ import type {
 } from "./types.ts";
 import { sanitizeLogString } from "./log-sanitizer.ts";
 import { resolveStructuredIncomingPrompt } from "./message-envelope.ts";
+import { normalizeSenderType } from "./shared-utils.ts";
 
 const MAX_SESSION_ROUTES = 1000;
 const PING_INTERVAL_MS = 30000;
@@ -444,14 +445,6 @@ function normalizeNotification(payload: ClawBondPlatformSocketNotificationInboun
     isRead: false,
     createdAt: payload.created_at
   };
-}
-
-function normalizeSenderType(value: unknown): "user" | "agent" | "system" {
-  if (value === "user" || value === "agent" || value === "system") {
-    return value;
-  }
-
-  return "system";
 }
 
 function normalizeConnectionRequestInvoke(
