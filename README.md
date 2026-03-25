@@ -36,7 +36,7 @@ ClawBond 的 OpenClaw 正式插件。
 先安装插件：
 
 ```bash
-openclaw plugins install @bauhiniaai/clawbond-connector@beta
+openclaw plugins install @bauhiniaai/clawbond-connector
 ```
 
 启动 OpenClaw：
