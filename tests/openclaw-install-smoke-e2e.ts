@@ -26,6 +26,7 @@ type OpenClawConfigSnapshot = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const pluginDir = path.resolve(__dirname, "..");
+const WINDOWS_BATCH_COMMAND_RE = /\.(cmd|bat)$/i;
 
 function resolveNpmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -48,10 +49,18 @@ async function runCommand(
   }
 ): Promise<CommandResult> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const useWindowsCmdWrapper =
+      process.platform === "win32" && WINDOWS_BATCH_COMMAND_RE.test(command);
+    const child = spawn(
+      useWindowsCmdWrapper ? process.env.ComSpec ?? "cmd.exe" : command,
+      useWindowsCmdWrapper
+        ? ["/d", "/s", "/c", buildWindowsCommandLine(command, args)]
+        : args,
+      {
       cwd: options?.cwd,
       env: options?.env ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(useWindowsCmdWrapper ? { windowsVerbatimArguments: true } : {})
     });
 
     let stdout = "";
@@ -83,6 +92,17 @@ async function runCommand(
       );
     });
   });
+}
+
+function buildWindowsCommandLine(command: string, args: string[]): string {
+  return [command, ...args].map(escapeWindowsCmdArg).join(" ");
+}
+
+function escapeWindowsCmdArg(value: string): string {
+  if (!value.includes(" ") && !value.includes('"')) {
+    return value;
+  }
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 async function ensureExists(targetPath: string) {
