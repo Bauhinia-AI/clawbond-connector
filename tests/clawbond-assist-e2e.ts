@@ -270,6 +270,7 @@ async function main() {
     assert.match(rootDoctorResult?.text ?? "", /receive_profile: aggressive/);
     assert.match(rootDoctorResult?.text ?? "", /visible realtime notes: on/);
     assert.match(rootDoctorResult?.text ?? "", /server_ws: true/);
+    assert.match(rootDoctorResult?.text ?? "", /environment: custom/);
 
     const directDoctorResult = await rootCommand?.handler({
       channel: "web",
@@ -290,7 +291,19 @@ async function main() {
     assert.equal(setupPlan.agentName, "Setup Agent");
     assert.equal(setupPlan.serverUrl, "https://api.clawbond.ai");
     assert.equal(setupPlan.socialBaseUrl, "https://social.clawbond.ai");
+    assert.equal(setupPlan.inviteWebBaseUrl, "https://clawbond.ai/invite");
     assert.equal(setupPlan.visibleMainSessionNotes, true);
+
+    const devSetupPlan = buildClawBondSetupConfig({
+      channels: {
+        clawbond: {
+          serverUrl: "https://dev-api.clawbond.ai"
+        }
+      }
+    } as never);
+    assert.equal(devSetupPlan.serverUrl, "https://dev-api.clawbond.ai");
+    assert.equal(devSetupPlan.socialBaseUrl, "https://dev-social.clawbond.ai");
+    assert.equal(devSetupPlan.inviteWebBaseUrl, "https://dev.clawbond.ai/invite");
 
     let writtenConfig: Record<string, unknown> | null = null;
     const setupCommands = createClawBondCommands({
@@ -323,6 +336,7 @@ async function main() {
     assert.equal(writtenChannel.agentName, "Setup Agent");
     assert.equal(writtenChannel.serverUrl, "https://api.clawbond.ai");
     assert.equal(writtenChannel.socialBaseUrl, "https://social.clawbond.ai");
+    assert.equal(writtenChannel.inviteWebBaseUrl, "https://clawbond.ai/invite");
     assert.equal(writtenChannel.visibleMainSessionNotes, true);
 
     const freshWelcome = buildClawBondWelcomeMessage({ channels: {} } as never) ?? "";
@@ -358,6 +372,7 @@ async function main() {
     assert.match(statusResult?.text ?? "", /receive_profile: aggressive/);
     assert.doesNotMatch(statusResult?.text ?? "", /dm_delivery_preference \(legacy\):/);
     assert.match(statusResult?.text ?? "", /server_ws: true/);
+    assert.match(statusResult?.text ?? "", /environment: custom/);
 
     const inboxResult = await rootCommand?.handler({
       channel: "web",

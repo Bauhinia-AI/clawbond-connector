@@ -102,7 +102,8 @@ export function resolveAccount(
     stored?.credentials.invite_web_base_url ??
     ""
   )
-    .trim()
+    .trim() || resolveInviteWebBaseUrl("", apiBaseUrl || serverUrl);
+  const normalizedInviteWebBaseUrl = inviteWebBaseUrl
     .replace(/\/+$/, "");
   const trustedSenderAgentIds = normalizeTrustedSenderAgentIds(
     scoped.trustedSenderAgentIds ?? config.trustedSenderAgentIds
@@ -165,7 +166,7 @@ export function resolveAccount(
     bindCode,
     ownerUserId,
     bindingStatus,
-    inviteWebBaseUrl,
+    inviteWebBaseUrl: normalizedInviteWebBaseUrl,
     trustedSenderAgentIds,
     structuredMessagePrefix,
     notificationsEnabled,
@@ -184,22 +185,20 @@ export function resolveSocialBaseUrl(value: unknown, platformBaseUrl: string): s
     return explicit;
   }
 
-  const normalizedPlatform = platformBaseUrl.trim();
-  if (!normalizedPlatform) {
-    return "";
+  return resolveClawBondDomainBundle(platformBaseUrl).socialBaseUrl;
+}
+
+export function resolveInviteWebBaseUrl(value: unknown, platformBaseUrl: string): string {
+  const explicit = readTrimmedStringOrEmpty(value).replace(/\/+$/, "");
+  if (explicit) {
+    return explicit;
   }
 
-  try {
-    const url = new URL(normalizedPlatform);
-    switch (url.hostname) {
-      case "api.clawbond.ai":
-        return "https://social.clawbond.ai";
-      default:
-        return "";
-    }
-  } catch {
-    return "";
-  }
+  return resolveClawBondDomainBundle(platformBaseUrl).inviteWebBaseUrl;
+}
+
+export function resolveClawBondEnvironmentLabel(platformBaseUrl: string): string {
+  return resolveClawBondDomainBundle(platformBaseUrl).environment;
 }
 
 export function isConfigured(account: ClawBondAccount): boolean {
@@ -317,6 +316,60 @@ function resolveNotificationApiUrl(serverUrl: string, override: unknown): string
   }
 
   return normalizeHttpBaseUrl(serverUrl);
+}
+
+function resolveClawBondDomainBundle(platformBaseUrl: string): {
+  environment: "production" | "development" | "staging" | "custom" | "unknown";
+  socialBaseUrl: string;
+  inviteWebBaseUrl: string;
+} {
+  const normalizedPlatform = platformBaseUrl.trim();
+  if (!normalizedPlatform) {
+    return {
+      environment: "unknown",
+      socialBaseUrl: "",
+      inviteWebBaseUrl: ""
+    };
+  }
+
+  try {
+    const url = new URL(normalizedPlatform);
+    const protocol = url.protocol || "https:";
+    const hostname = url.hostname.toLowerCase();
+
+    if (hostname === "api.clawbond.ai") {
+      return {
+        environment: "production",
+        socialBaseUrl: `${protocol}//social.clawbond.ai`,
+        inviteWebBaseUrl: `${protocol}//clawbond.ai/invite`
+      };
+    }
+
+    const prefixedMatch = hostname.match(/^([a-z0-9-]+)-api\.clawbond\.ai$/);
+    if (prefixedMatch) {
+      const prefix = prefixedMatch[1];
+      const environment =
+        prefix === "dev" ? "development" : prefix === "stg" ? "staging" : "custom";
+
+      return {
+        environment,
+        socialBaseUrl: `${protocol}//${prefix}-social.clawbond.ai`,
+        inviteWebBaseUrl: `${protocol}//${prefix}.clawbond.ai/invite`
+      };
+    }
+
+    return {
+      environment: "custom",
+      socialBaseUrl: "",
+      inviteWebBaseUrl: ""
+    };
+  } catch {
+    return {
+      environment: "unknown",
+      socialBaseUrl: "",
+      inviteWebBaseUrl: ""
+    };
+  }
 }
 
 function hasManualRuntimeConfig(config: ClawBondPluginConfig): boolean {

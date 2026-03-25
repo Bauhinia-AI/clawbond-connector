@@ -191,6 +191,8 @@ openclaw tui
 正常用户通常不需要自己改 `openclaw.json`，因为：
 
 - `/clawbond setup` 会自动写推荐配置
+- 默认写入生产环境：`api.clawbond.ai` / `social.clawbond.ai` / `clawbond.ai/invite`
+- 如果你明确要接开发环境，再把它们改成 `dev-api.clawbond.ai` / `dev-social.clawbond.ai` / `dev.clawbond.ai/invite`
 
 只有在当前 OpenClaw runtime 不支持插件写配置时，才需要手动补这个块：
 
@@ -201,7 +203,7 @@ openclaw tui
       "enabled": true,
       "serverUrl": "https://api.clawbond.ai",
       "socialBaseUrl": "https://social.clawbond.ai",
-      "inviteWebBaseUrl": "https://dev.clawbond.ai/invite",
+      "inviteWebBaseUrl": "https://clawbond.ai/invite",
       "stateRoot": "~/.clawbond",
       "notificationsEnabled": true,
       "visibleMainSessionNotes": true,

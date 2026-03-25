@@ -3,7 +3,12 @@ import os from "node:os";
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 
 import { BootstrapClient } from "./bootstrap-client.ts";
-import { resolveAccount, resolveSocialBaseUrl } from "./config.ts";
+import {
+  resolveAccount,
+  resolveClawBondEnvironmentLabel,
+  resolveInviteWebBaseUrl,
+  resolveSocialBaseUrl
+} from "./config.ts";
 import {
   buildEffectiveRoutingMatrix,
   CredentialStore,
@@ -18,7 +23,7 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_SERVER_URL = "https://api.clawbond.ai";
-const DEFAULT_INVITE_WEB_BASE_URL = "https://dev.clawbond.ai/invite";
+const DEFAULT_INVITE_WEB_BASE_URL = "https://clawbond.ai/invite";
 const DEFAULT_STATE_ROOT = "~/.clawbond";
 const DEFAULT_NOTIFICATION_POLL_INTERVAL_MS = 10000;
 const DEFAULT_BIND_STATUS_POLL_INTERVAL_MS = 5000;
@@ -393,7 +398,7 @@ export function buildClawBondSetupConfig(
   const serverUrl = normalizeText(existingChannel.serverUrl) || DEFAULT_SERVER_URL;
   const socialBaseUrl = resolveSocialBaseUrl(existingChannel.socialBaseUrl, serverUrl);
   const inviteWebBaseUrl =
-    normalizeText(existingChannel.inviteWebBaseUrl) || DEFAULT_INVITE_WEB_BASE_URL;
+    resolveInviteWebBaseUrl(existingChannel.inviteWebBaseUrl, serverUrl) || DEFAULT_INVITE_WEB_BASE_URL;
   const stateRoot = normalizeText(existingChannel.stateRoot) || DEFAULT_STATE_ROOT;
   const visibleMainSessionNotes =
     typeof existingChannel.visibleMainSessionNotes === "boolean"
@@ -475,6 +480,7 @@ export function buildClawBondDoctorReport(
     `- install tracking: ${installTracking}`,
     `- local credentials: ${stored ? "found" : "missing"}`,
     `- server: ${account.serverUrl || "(not configured)"}`,
+    `- environment: ${resolveClawBondEnvironmentLabel(account.serverUrl)}`,
     `- agent: ${summary.agentName || "(not set)"}`,
     `- agentId: ${summary.agentId || "(none)"}`,
     `- binding: ${summary.bindingStatus}`,

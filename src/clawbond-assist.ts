@@ -2,7 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondHttpError, ClawBondToolSession } from "./clawbond-api.ts";
-import { listAccountIds } from "./config.ts";
+import { listAccountIds, resolveClawBondEnvironmentLabel } from "./config.ts";
 import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import { normalizeSenderType, readTrimmedStringOrEmpty } from "./shared-utils.ts";
@@ -824,6 +824,7 @@ export function formatStatusSnapshotForCommand(
     `- receive_profile: ${(settings ?? { receive_profile: snapshot.receiveProfile }).receive_profile} (fixed local default)`,
     `- server_ws: ${formatServerWsStatus(serverWsStatus)} (managed by web)`,
     `- server: ${snapshot.serverUrl}`,
+    `- environment: ${resolveClawBondEnvironmentLabel(snapshot.serverUrl)}`,
     `- social: ${snapshot.socialBaseUrl || "(not configured)"}`,
     `- stateRoot: ${snapshot.stateRoot}`
   ];
