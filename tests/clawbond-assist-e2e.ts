@@ -9,7 +9,9 @@ import { ClawBondActivityStore } from "../src/activity-store.ts";
 import { createClawBondCommands } from "../src/clawbond-commands.ts";
 import {
   buildBackgroundActivityRecap,
+  buildClawBondPolicyContext,
   buildConversationStartSummary,
+  buildPendingMainInboxAgentContext,
   loadClawBondActivitySnapshot,
   loadClawBondPendingMainInboxSnapshot,
   loadClawBondInboxDigest
@@ -412,6 +414,36 @@ async function main() {
       pendingMainInbox?.items[0]?.content ?? "",
       /同一个 conversationId 但不同 peer 不应合并/
     );
+    assert.match(buildClawBondPolicyContext(), /same human as the local OpenClaw owner/);
+    const ownerContext = buildPendingMainInboxAgentContext({
+      accountId: "default",
+      agentId: "agent-local",
+      items: [
+        {
+          id: "pending-owner-1",
+          accountId: "default",
+          fingerprint: "pending-owner-1",
+          traceId: "trace-owner-1",
+          sourceKind: "message",
+          receiveCategory: "owner_dm",
+          receiveMode: "inject_main",
+          peerId: "user-1",
+          peerLabel: "bound-owner",
+          summary: "Pending DM from bound owner",
+          content: "继续刚才本地聊的那个任务。",
+          receivedAt: "2026-03-19T09:05:00Z",
+          status: "pending",
+          conversationId: "conv-owner-1",
+          wakeRequestedAt: null,
+          wakeCount: 0,
+          handledAt: null,
+          handledBy: null,
+          responsePreview: null
+        }
+      ]
+    });
+    assert.match(ownerContext, /receiveCategory: owner_dm/);
+    assert.match(ownerContext, /same human as local OpenClaw owner/);
 
     const hook = createClawBondBeforePromptBuildHandler({
       config: cfg,

@@ -597,27 +597,56 @@ async function main() {
       sessionKey: "agent:main:main"
     });
     const nonOwnerRegisterTool = requireTool(nonOwnerTools, "clawbond_register");
+    const nonOwnerDmTool = requireTool(nonOwnerTools, "clawbond_dm");
+    const nonOwnerActivityTool = requireTool(nonOwnerTools, "clawbond_activity");
 
     const nonOwnerSummary = await nonOwnerRegisterTool.execute("tool-9", {
       action: "summary"
     });
     assert.equal(nonOwnerSummary.details["phase"], "ready");
 
-    await assert.rejects(
-      nonOwnerRegisterTool.execute("tool-10", {
-        action: "local_settings",
-        notificationsEnabled: true
-      }),
-      /owner-only ClawBond action/
+    const nonOwnerSettingsUpdate = await nonOwnerRegisterTool.execute("tool-10", {
+      action: "local_settings",
+      notificationsEnabled: true
+    });
+    assert.match(
+      nonOwnerSettingsUpdate.content[0]?.type === "text" ? nonOwnerSettingsUpdate.content[0].text : "",
+      /ClawBond local settings updated/
     );
 
-    await assert.rejects(
-      nonOwnerRegisterTool.execute("tool-11", {
-        action: "create",
-        agentName: "Blocked Non Owner"
-      }),
-      /owner-only ClawBond action/
-    );
+    const nonOwnerDmList = await nonOwnerDmTool.execute("tool-11", {
+      action: "list_conversations",
+      page: 2,
+      limit: 5,
+      category: "participated"
+    });
+    assert.equal(nonOwnerDmList.details["conversations"][0]["id"], "conv-1");
+
+    const nonOwnerActivity = await nonOwnerActivityTool.execute("tool-12", {
+      action: "summary"
+    });
+    assert.equal(nonOwnerActivity.details["accountId"], "default");
+
+    const remoteOwnerTools = createClawBondTools({
+      config: cfg,
+      senderIsOwner: false,
+      requesterSenderId: "user-1",
+      messageChannel: "clawbond",
+      agentAccountId: "default",
+      sessionKey: "agent:main:main"
+    });
+    const remoteOwnerRegisterTool = requireTool(remoteOwnerTools, "clawbond_register");
+    const remoteOwnerActivityTool = requireTool(remoteOwnerTools, "clawbond_activity");
+
+    const remoteOwnerSummary = await remoteOwnerRegisterTool.execute("tool-13", {
+      action: "summary"
+    });
+    assert.equal(remoteOwnerSummary.details["phase"], "ready");
+
+    const remoteOwnerActivity = await remoteOwnerActivityTool.execute("tool-14", {
+      action: "summary"
+    });
+    assert.equal(remoteOwnerActivity.details["accountId"], "default");
 
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/me"));
     assert.ok(seen.some((entry) => entry.pathname === "/api/agent/messages/send"));

@@ -91,7 +91,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
 
       switch (action) {
         case "summary": {
-          ensureToolAccess(ctx, "clawbond_register", "read");
+          ensureToolAccess(ctx, "clawbond_register", "read", accountId);
           const summary = buildClawBondOnboardingSummary(ctx.config, accountId);
           const lines = [
             `ClawBond register summary (${summary.accountId})`,
@@ -117,7 +117,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(lines.join("\n"), summary);
         }
         case "setup": {
-          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.setup", "write");
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.setup", "write", accountId);
           const text = await runClawBondSetup({
             cfg: ctx.config,
             runtime,
@@ -130,7 +130,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "create": {
-          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.create", "write");
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.create", "write", accountId);
           const text = await runClawBondRegisterCreate({
             cfg: ctx.config,
             runtime,
@@ -144,7 +144,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "bind": {
-          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.bind", "write");
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.bind", "write", accountId);
           const text = await runClawBondRegisterBind({
             cfg: ctx.config,
             runtime,
@@ -157,7 +157,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
           return textToolResult(text, summary);
         }
         case "local_settings": {
-          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.local_settings", "write");
+          ensureOwnerOnlyToolAccess(ctx, "clawbond_register.local_settings", "write", accountId);
           const text = await runClawBondLocalConfigUpdate({
             cfg: ctx.config,
             runtime,
@@ -197,9 +197,10 @@ function createStatusTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams, signal) => {
-      ensureToolAccess(ctx, "clawbond_status");
+      const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
+      ensureToolAccess(ctx, "clawbond_status", "read", accountId);
       const action = readRequiredString(rawParams, "action");
-      const session = resolveToolSession(ctx, rawParams);
+      const session = new ClawBondToolSession(ctx.config, accountId);
 
       const details = await session.withAgentToken(`clawbond_status:${action}`, async (token) => {
         switch (action) {
@@ -297,9 +298,10 @@ function createDmTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams, signal) => {
-      ensureToolAccess(ctx, "clawbond_dm", "write");
+      const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
+      ensureToolAccess(ctx, "clawbond_dm", "write", accountId);
       const action = readRequiredString(rawParams, "action");
-      const session = resolveToolSession(ctx, rawParams);
+      const session = new ClawBondToolSession(ctx.config, accountId);
       const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 20);
       const page = clampLimit(readOptionalNumber(rawParams, "page"), 1, 10000);
 
@@ -479,6 +481,7 @@ function createActivityTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
     execute: async (_toolCallId, rawParams) => {
       const action = readRequiredString(rawParams, "action");
       const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId ?? null;
+      ensureToolAccess(ctx, "clawbond_activity", "read", accountId);
       const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 5, 50);
       const snapshot = loadClawBondActivitySnapshot(ctx.config, accountId);
 
@@ -558,9 +561,10 @@ function createNotificationsTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams, signal) => {
-      ensureToolAccess(ctx, "clawbond_notifications", "write");
+      const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
+      ensureToolAccess(ctx, "clawbond_notifications", "write", accountId);
       const action = readRequiredString(rawParams, "action");
-      const session = resolveToolSession(ctx, rawParams);
+      const session = new ClawBondToolSession(ctx.config, accountId);
       const page = clampLimit(readOptionalNumber(rawParams, "page"), 1, 10000);
       const limit = clampLimit(readOptionalNumber(rawParams, "limit"), 20);
 
@@ -690,9 +694,10 @@ function createConnectionRequestsTool(ctx: OpenClawPluginToolContext): AnyAgentT
       required: ["action"]
     },
     execute: async (_toolCallId, rawParams, signal) => {
-      ensureToolAccess(ctx, "clawbond_connection_requests", "write");
+      const accountId = readOptionalString(rawParams, "accountId") ?? ctx.agentAccountId;
+      ensureToolAccess(ctx, "clawbond_connection_requests", "write", accountId);
       const action = readRequiredString(rawParams, "action");
-      const session = resolveToolSession(ctx, rawParams);
+      const session = new ClawBondToolSession(ctx.config, accountId);
 
       const details = await session.withAgentToken(
         `clawbond_connection_requests:${action}`,
@@ -774,16 +779,6 @@ function createConnectionRequestsTool(ctx: OpenClawPluginToolContext): AnyAgentT
       return jsonToolResult(`ClawBond connection request action ${action} completed.`, details);
     }
   };
-}
-
-function resolveToolSession(
-  ctx: OpenClawPluginToolContext,
-  params: Record<string, unknown>
-): ClawBondToolSession {
-  return new ClawBondToolSession(
-    ctx.config,
-    readOptionalString(params, "accountId") ?? ctx.agentAccountId
-  );
 }
 
 function summarizeAccount(session: ClawBondToolSession) {

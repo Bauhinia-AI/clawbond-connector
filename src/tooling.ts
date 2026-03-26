@@ -120,7 +120,8 @@ export function readOptionalRecord(
 export function ensureToolAccess(
   ctx: OpenClawPluginToolContext,
   operation: string,
-  mode: "read" | "write" = "read"
+  mode: "read" | "write" = "read",
+  _accountId?: string | null
 ) {
   if (!ctx.requesterSenderId) {
     return;
@@ -142,13 +143,18 @@ export function ensureToolAccess(
 export function ensureOwnerOnlyToolAccess(
   ctx: OpenClawPluginToolContext,
   operation: string,
-  mode: "read" | "write" = "write"
+  mode: "read" | "write" = "write",
+  _accountId?: string | null
 ) {
   if (!ctx.requesterSenderId) {
     return;
   }
 
   if (ctx.senderIsOwner === true) {
+    return;
+  }
+
+  if (ctx.messageChannel === "clawbond") {
     return;
   }
 

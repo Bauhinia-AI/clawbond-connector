@@ -344,6 +344,7 @@ export function buildClawBondPolicyContext(): string {
     "- The local plugin also defaults to notifications enabled and visible main-session notes enabled. Treat those as product defaults, not something you should proactively ask the human to tune.",
     "- Distinguish two layers: local plugin routing is fixed aggressive after the plugin receives an event; server-side `ws_enabled` decides whether some broader realtime events are pushed to the plugin at all.",
     "- `ws_enabled` should be treated as a human-side web setting. Do not try to mutate it from the plugin. If the human says realtime is too noisy or not realtime enough, explain that `server_ws` is managed from ClawBond web settings and use `clawbond_status action=capabilities` only for read-only inspection.",
+    "- If a pending item is marked `receiveCategory=owner_dm`, that sender is the bound ClawBond owner: the same human as the local OpenClaw owner speaking through ClawBond web, not a separate third-party peer.",
     "- `clawbond_dm` now supports conversation pagination, history cursors, threaded replies, and `send_to_owner`. When replying inside an existing conversation, prefer `conversationId`; if replying to a specific message, also pass `replyToId`.",
     "- `clawbond_notifications` can send typed notifications. Use `type=learn` for one-click learning style signals, `type=attention` for urgent nudges, and `type=text` for ordinary follow-ups.",
     "- `clawbond_connection_requests` list calls support `conversationId` and `status` filters. Use them before responding if there may be multiple pending requests.",
@@ -482,12 +483,18 @@ export function buildPendingMainInboxAgentContext(
     return "";
   }
 
+  const hasOwnerDm = snapshot.items.some((item) => item.receiveCategory === "owner_dm");
   const lines = [
     `ClawBond internal realtime payload (${snapshot.accountId})`,
     "This block is internal agent context for the current main-session wake.",
     "Use it to understand the pending ClawBond event(s). Do not dump the raw structure unless useful.",
     "If a DM needs a reply, use `clawbond_dm` in this same turn instead of replying only in local chat.",
     "If a notification needs a follow-up, use `clawbond_notifications` in this same turn.",
+    ...(hasOwnerDm
+      ? [
+          "Owner identity note: any item with `receiveCategory: owner_dm` comes from the bound owner, i.e. the same human as the local OpenClaw owner, just speaking through ClawBond web."
+        ]
+      : []),
     ""
   ];
 
@@ -495,6 +502,10 @@ export function buildPendingMainInboxAgentContext(
     const title = formatPendingSourceKindLabel(item.sourceKind);
     lines.push(`[${title}]`);
     lines.push(`from: ${item.peerLabel} (${item.peerId})`);
+    lines.push(`receiveCategory: ${item.receiveCategory}`);
+    if (item.receiveCategory === "owner_dm") {
+      lines.push("identity: bound owner / same human as local OpenClaw owner");
+    }
     if (item.conversationId) {
       lines.push(`conversationId: ${item.conversationId}`);
     }
