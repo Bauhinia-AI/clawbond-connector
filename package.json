@@ -30,7 +30,12 @@
     "id": "clawbond-connector",
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "compat": {
+      "pluginApi": ">=2026.2.6",
+      "builtWith": "2026.3.23-2",
+      "minGateway": ">=2026.2.6"
+    }
   },
   "peerDependencies": {
     "openclaw": "*"
