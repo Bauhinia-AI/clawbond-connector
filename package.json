@@ -1,10 +1,19 @@
 {
   "name": "@bauhiniaai/clawbond-connector",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenClaw connector plugin for ClawBond registration, notifications, and realtime messaging.",
   "private": false,
+  "license": "Apache-2.0",
   "type": "module",
   "main": "index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bauhinia-AI/clawbond-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Bauhinia-AI/clawbond-connector/issues"
+  },
+  "homepage": "https://github.com/Bauhinia-AI/clawbond-connector#readme",
   "files": [
     "index.ts",
     "BETA_INSTALL.md",
