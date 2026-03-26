@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { sanitizeFileSegment } from "./shared-utils.ts";
+import { buildUnicodeStorageSlug, sanitizeFileSegment } from "./shared-utils.ts";
 import type {
   ClawBondReceiveProfile,
   ClawBondRoutingMatrix,
@@ -311,7 +311,7 @@ export function resolveStateRoot(value: string | undefined): string {
     return os.homedir();
   }
 
-  if (trimmed.startsWith("~/")) {
+  if (/^~[\\/]/.test(trimmed)) {
     return path.join(os.homedir(), trimmed.slice(2));
   }
 
@@ -319,11 +319,7 @@ export function resolveStateRoot(value: string | undefined): string {
 }
 
 export function buildAgentKey(agentName: string, agentId: string): string {
-  const slug = agentName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-") || "agent";
+  const slug = buildUnicodeStorageSlug(agentName, "agent");
   const suffix = agentId.slice(-6) || agentId;
   return `${slug}-${suffix}`;
 }
