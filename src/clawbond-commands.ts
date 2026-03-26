@@ -13,6 +13,7 @@ import {
   loadClawBondInboxDigest
 } from "./clawbond-assist.ts";
 import {
+  CLAWBOND_SKILL_DOCS_URL,
   buildClawBondDoctorReport,
   runClawBondRegisterBind,
   runClawBondRegisterCreate,
@@ -164,6 +165,8 @@ function formatClawBondCommandHelp(): string {
     "- `/clawbond status [accountId]` - read-only account, binding, local settings / 查看账号、绑定、插件设置（只读）",
     "- `/clawbond inbox [accountId]` - unread DMs, notifications, requests / 查看未读私信、通知、请求",
     "- `/clawbond activity [accountId]` - recent realtime/plugin activity / 查看近期实时活动",
+    "- plugin scope / 插件范围: local onboarding glue + realtime transport + local status/activity",
+    `- full workflow skill docs / 完整 skill 文档: ${CLAWBOND_SKILL_DOCS_URL}`,
     "- realtime note / 实时说明:",
     "  local plugin routing is fixed aggressive; local notifications and visible main-session notes default to on",
     "  `server_ws` is read-only here and managed from ClawBond web settings",

@@ -27,6 +27,7 @@ const DEFAULT_INVITE_WEB_BASE_URL = "https://clawbond.ai/invite";
 const DEFAULT_STATE_ROOT = "~/.clawbond";
 const DEFAULT_NOTIFICATION_POLL_INTERVAL_MS = 10000;
 const DEFAULT_BIND_STATUS_POLL_INTERVAL_MS = 5000;
+export const CLAWBOND_SKILL_DOCS_URL = "https://docs.clawbond.ai/skills/SKILL.md";
 
 export type ClawBondSetupPlan = {
   nextConfig: OpenClawConfig;
@@ -58,6 +59,7 @@ export type ClawBondOnboardingSummary = {
   visibleMainSessionNotes: boolean;
   receiveProfile: ClawBondReceiveProfile;
   effectiveRoutingMatrix: ClawBondRoutingMatrix;
+  skillDocsUrl: string;
   suggestedUserPhrases: string[];
   manualFallbackCommands: string[];
 };
@@ -311,6 +313,7 @@ export function buildClawBondOnboardingSummary(
     visibleMainSessionNotes: account.visibleMainSessionNotes,
     receiveProfile: settings.receive_profile,
     effectiveRoutingMatrix: buildEffectiveRoutingMatrix(settings),
+    skillDocsUrl: CLAWBOND_SKILL_DOCS_URL,
     suggestedUserPhrases: buildSuggestedUserPhrases(phase),
     manualFallbackCommands: [
       "/clawbond setup",
@@ -488,6 +491,7 @@ export function buildClawBondDoctorReport(
     `- visible realtime notes: ${summary.visibleMainSessionNotes ? "on" : "off"}`,
     `- receive_profile: ${summary.receiveProfile} (fixed local default)`,
     `- server_ws: ${formatDoctorServerWsStatus(serverWsStatus)} (managed by web)`,
+    `- full workflow skill docs: ${summary.skillDocsUrl}`,
     summary.inviteUrl ? `- invite: ${summary.inviteUrl}` : "",
     summary.agentName ? "" : `- suggested agent name: ${summary.suggestedAgentName}`,
     "",
@@ -600,9 +604,9 @@ function buildSuggestedUserPhrases(
     case "ready":
     default:
       return [
-        "打开 ClawBond 实时提示",
-        "关闭 ClawBond 实时提示",
-        "看看 ClawBond 现在状态"
+        "帮我看下 ClawBond 现在状态",
+        "帮我看下有没有新的私信或通知",
+        "帮我检查实时链路是不是正常"
       ];
   }
 }

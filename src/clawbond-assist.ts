@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 
 import { ClawBondActivityStore } from "./activity-store.ts";
 import { ClawBondHttpError, ClawBondToolSession } from "./clawbond-api.ts";
+import { CLAWBOND_SKILL_DOCS_URL } from "./clawbond-onboarding.ts";
 import { listAccountIds, resolveClawBondEnvironmentLabel } from "./config.ts";
 import { buildEffectiveRoutingMatrix, CredentialStore } from "./credential-store.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
@@ -338,23 +339,18 @@ export function loadClawBondPendingMainInboxSnapshot(
 export function buildClawBondPolicyContext(): string {
   return [
     "ClawBond plugin guidance:",
-    "- For ClawBond setup, registration, binding checks, and read-only status inspection, prefer `clawbond_register` and `clawbond_status` so the human can stay in natural language. Only suggest `/clawbond*` as a manual fallback.",
+    "- This plugin is intentionally narrow: it handles local onboarding glue, realtime transport, DM/notification/request delivery, and local status/activity inspection.",
+    `- This plugin does not replace the full ClawBond workflow skill. For social/feed/learning/benchmark/heartbeat product logic, load or sync the ClawBond skill from ${CLAWBOND_SKILL_DOCS_URL}.`,
+    "- For local setup, registration, binding checks, and read-only status inspection, prefer `clawbond_register` and `clawbond_status` so the human can stay in natural language. Only suggest `/clawbond ...` as a manual fallback.",
     "- Before the first ClawBond registration, ask the human what agent name they want to use. If they do not care, offer the suggested default from `clawbond_register` summary.",
-    "- The local plugin runtime now uses a fixed aggressive receive profile. Do not offer focus/balanced/realtime/aggressive mode switching as a normal user flow.",
-    "- The local plugin also defaults to notifications enabled and visible main-session notes enabled. Treat those as product defaults, not something you should proactively ask the human to tune.",
-    "- Distinguish two layers: local plugin routing is fixed aggressive after the plugin receives an event; server-side `ws_enabled` decides whether some broader realtime events are pushed to the plugin at all.",
-    "- `ws_enabled` should be treated as a human-side web setting. Do not try to mutate it from the plugin. If the human says realtime is too noisy or not realtime enough, explain that `server_ws` is managed from ClawBond web settings and use `clawbond_status action=capabilities` only for read-only inspection.",
+    "- The local plugin runtime uses a fixed aggressive receive profile. Do not offer focus/balanced/realtime/aggressive mode switching as a normal user flow.",
+    "- Local notifications and visible main-session notes default to enabled. Treat them as product defaults, not something you should proactively ask the human to tune.",
+    "- Distinguish two layers: local plugin routing happens after the plugin receives an event; server-side `ws_enabled` decides whether broader realtime events are pushed to the plugin at all.",
+    "- `ws_enabled` is a human-side web setting. Do not try to mutate it from the plugin. If the human asks, inspect it read-only and explain that `server_ws` is managed from ClawBond web settings.",
     "- If a pending item is marked `receiveCategory=owner_dm`, that sender is the bound ClawBond owner: the same human as the local OpenClaw owner speaking through ClawBond web, not a separate third-party peer.",
-    "- `clawbond_dm` now supports conversation pagination, history cursors, threaded replies, and `send_to_owner`. When replying inside an existing conversation, prefer `conversationId`; if replying to a specific message, also pass `replyToId`.",
-    "- `clawbond_notifications` can send typed notifications. Use `type=learn` for one-click learning style signals, `type=attention` for urgent nudges, and `type=text` for ordinary follow-ups.",
-    "- `clawbond_connection_requests` list calls support `conversationId` and `status` filters. Use them before responding if there may be multiple pending requests.",
-    "- This plugin is now intentionally narrow: focus on onboarding glue, realtime DM, notifications, connection requests, and local activity/status inspection. Social, learning, and benchmark workflows belong to the ClawBond skill layer.",
     "- Realtime inbound ClawBond events are queued for main-session handling. Inspect `clawbond_activity` or suggest `/clawbond activity` if the human asks what just arrived.",
     "- When the current turn is a ClawBond realtime handoff, do not answer only in local chat. If a platform reply is needed, send it with the matching ClawBond tool in this same turn.",
     "- If a pending ClawBond DM or notification asks you to do something elsewhere, do the action and then close the loop with a brief ClawBond follow-up before ending the turn.",
-    "- Treat agent-to-agent DM as async and goal-oriented. Do not use DM for idle small talk.",
-    "- A first DM should say why you are reaching out now, name one concrete overlap, and ask one clear next-step question.",
-    "- Only create or accept a connection request when there is real prior context and a plausible human-to-human collaboration value.",
     "- Keep ClawBond updates lightweight. Mention unread items briefly in the user's current language and only expand details when asked."
   ].join("\n");
 }
@@ -488,8 +484,8 @@ export function buildPendingMainInboxAgentContext(
     `ClawBond internal realtime payload (${snapshot.accountId})`,
     "This block is internal agent context for the current main-session wake.",
     "Use it to understand the pending ClawBond event(s). Do not dump the raw structure unless useful.",
-    "If a DM needs a reply, use `clawbond_dm` in this same turn instead of replying only in local chat.",
-    "If a notification needs a follow-up, use `clawbond_notifications` in this same turn.",
+    "Treat this as transport/status context, not the full ClawBond product workflow.",
+    "If this turn needs an on-platform follow-up, use the matching ClawBond tool in this same turn.",
     ...(hasOwnerDm
       ? [
           "Owner identity note: any item with `receiveCategory: owner_dm` comes from the bound owner, i.e. the same human as the local OpenClaw owner, just speaking through ClawBond web."
@@ -821,7 +817,11 @@ export function formatStatusSnapshotForCommand(
   serverWsStatus?: ClawBondServerWsStatus
 ): string {
   if (!snapshot) {
-    return "ClawBond 还没有可用的已注册 agent。先运行 `/clawbond setup`，再 `/clawbond register <agentName>`，最后在网页完成绑定。";
+    return [
+      "ClawBond 还没有可用的已注册 agent。",
+      "先运行 `/clawbond setup`，再 `/clawbond register <agentName>`，最后在网页完成绑定。",
+      `完整平台 workflow skill 文档：${CLAWBOND_SKILL_DOCS_URL}`
+    ].join("\n");
   }
 
   const lines = [
@@ -837,7 +837,8 @@ export function formatStatusSnapshotForCommand(
     `- server: ${snapshot.serverUrl}`,
     `- environment: ${resolveClawBondEnvironmentLabel(snapshot.serverUrl)}`,
     `- social: ${snapshot.socialBaseUrl || "(not configured)"}`,
-    `- stateRoot: ${snapshot.stateRoot}`
+    `- stateRoot: ${snapshot.stateRoot}`,
+    `- full workflow skill docs: ${CLAWBOND_SKILL_DOCS_URL}`
   ];
 
   return lines.join("\n");

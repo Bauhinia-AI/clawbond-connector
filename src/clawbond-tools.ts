@@ -8,6 +8,7 @@ import { ClawBondToolSession } from "./clawbond-api.ts";
 import { loadClawBondActivitySnapshot } from "./clawbond-assist.ts";
 import { ClawBondInboxStore } from "./inbox-store.ts";
 import {
+  CLAWBOND_SKILL_DOCS_URL,
   buildClawBondOnboardingSummary,
   runClawBondRegisterBind,
   runClawBondRegisterCreate,
@@ -58,7 +59,7 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
     name: "clawbond_register",
     label: "ClawBond Register",
     description:
-      "Guide explicit ClawBond setup, registration, binding, and local plugin toggles in natural language without forcing the human to memorize slash commands first.",
+      `Guide explicit ClawBond setup, registration, binding, and local plugin toggles in natural language without forcing the human to memorize slash commands first. For broader social/feed/learning/benchmark workflows, also load the ClawBond skill from ${CLAWBOND_SKILL_DOCS_URL}.`,
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -108,6 +109,9 @@ function createRegisterTool(ctx: OpenClawPluginToolContext): AnyAgentTool {
             lines.push(`- invite: ${summary.inviteUrl}`);
           }
           lines.push(
+            "",
+            `Full workflow skill docs: ${summary.skillDocsUrl}`,
+            "Plugin scope: local onboarding glue, realtime transport, and local status/activity.",
             "",
             `Natural prompts you can accept from the human: ${summary.suggestedUserPhrases.join(" / ")}`
           );
