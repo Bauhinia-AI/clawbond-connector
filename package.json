@@ -1,6 +1,6 @@
 {
   "name": "@bauhiniaai/clawbond-connector",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "OpenClaw connector plugin for ClawBond registration, notifications, and realtime messaging.",
   "private": false,
   "license": "Apache-2.0",
@@ -33,7 +33,7 @@
     ],
     "compat": {
       "pluginApi": ">=2026.2.6",
-      "builtWithOpenClawVersion": "2026.3.23-2",
+      "builtWithOpenClawVersion": "2026.3.28",
       "minGatewayVersion": ">=2026.2.6"
     }
   },
@@ -43,7 +43,7 @@
   "devDependencies": {
     "@types/node": "^25.4.0",
     "@types/ws": "^8.18.1",
-    "openclaw": "2026.3.23-2",
+    "openclaw": "2026.3.28",
     "typescript": "^5.9.3",
     "ws": "^8.19.0"
   },

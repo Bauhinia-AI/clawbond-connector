@@ -307,6 +307,10 @@ npm run e2e:assist
 npm run e2e:tools
 ```
 
+维护者发布流程见：
+
+- `RELEASE.md`
+
 ## 更细的说明
 
 如果你想继续往下看：
