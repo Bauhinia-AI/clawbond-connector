@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { sanitizeLogString } from "./log-sanitizer.ts";
 import { getClawBondRuntime } from "./runtime.ts";
 
 const MAIN_SESSION_KEY = "agent:main:main";
 export const CLAWBOND_MAIN_SESSION_ACTIVATION_MESSAGE = "ClawBond realtime handoff.";
 const OPENCLAW_ENTRY_BASENAMES = new Set(["openclaw", "openclaw.mjs", "openclaw.js"]);
 const OPENCLAW_ENTRY_SUFFIXES = ["/dist/entry.js", "/dist/entry.mjs"];
+const SENSITIVE_OPENCLAW_FLAGS = new Set(["--token", "--password"]);
 
 export type OpenClawSpawnTarget = {
   command: string;
@@ -104,8 +106,33 @@ export function resolveOpenClawProfileArgs(): string[] {
   return [];
 }
 
+export function resolveOpenClawGatewayCallArgs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const args: string[] = [];
+  const url = resolveEnvValue(env, ["CLAWBOND_OPENCLAW_GATEWAY_URL", "OPENCLAW_GATEWAY_URL"]);
+  const token = resolveEnvValue(env, ["CLAWBOND_OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_TOKEN"]);
+  const password = resolveEnvValue(env, [
+    "CLAWBOND_OPENCLAW_GATEWAY_PASSWORD",
+    "OPENCLAW_GATEWAY_PASSWORD"
+  ]);
+
+  if (url) {
+    args.push("--url", url);
+  }
+
+  if (token) {
+    args.push("--token", token);
+  }
+
+  if (password) {
+    args.push("--password", password);
+  }
+
+  return args;
+}
+
 export function spawnDetachedOpenClaw(args: string[], onError?: (error: unknown) => void) {
   const target = resolveOpenClawSpawnTarget();
+  const commandLabel = formatOpenClawCommand(target, args);
   const child = spawn(target.command, [...target.args, ...args], {
     detached: true,
     stdio: "ignore",
@@ -113,7 +140,29 @@ export function spawnDetachedOpenClaw(args: string[], onError?: (error: unknown)
   });
 
   if (onError) {
-    child.on("error", onError);
+    let reported = false;
+    const report = (error: unknown) => {
+      if (reported) {
+        return;
+      }
+
+      reported = true;
+      onError(error);
+    };
+
+    child.on("error", report);
+    child.on("exit", (code, signal) => {
+      if (code === 0 && !signal) {
+        return;
+      }
+
+      if (signal) {
+        report(new Error(`Detached OpenClaw command exited via signal ${signal}: ${commandLabel}`));
+        return;
+      }
+
+      report(new Error(`Detached OpenClaw command failed with exit code ${code ?? "unknown"}: ${commandLabel}`));
+    });
   }
 
   child.unref();
@@ -140,7 +189,15 @@ export function queueMainSessionVisibleNote(
   });
 
   spawnDetachedOpenClaw(
-    [...resolveOpenClawProfileArgs(), "gateway", "call", "chat.inject", "--params", params],
+    [
+      ...resolveOpenClawProfileArgs(),
+      "gateway",
+      "call",
+      "chat.inject",
+      ...resolveOpenClawGatewayCallArgs(),
+      "--params",
+      params
+    ],
     options?.onError
   );
 }
@@ -228,7 +285,63 @@ export function queueMainSessionChatSend(
   });
 
   spawnDetachedOpenClaw(
-    [...resolveOpenClawProfileArgs(), "gateway", "call", "chat.send", "--params", params],
+    [
+      ...resolveOpenClawProfileArgs(),
+      "gateway",
+      "call",
+      "chat.send",
+      ...resolveOpenClawGatewayCallArgs(),
+      "--params",
+      params
+    ],
     options?.onError
   );
+}
+
+function resolveEnvValue(env: NodeJS.ProcessEnv, keys: string[]): string {
+  for (const key of keys) {
+    const value = env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function formatOpenClawCommand(target: OpenClawSpawnTarget, args: string[]): string {
+  return sanitizeLogString(
+    [...maskSensitiveCliArgs([target.command, ...target.args, ...args])].join(" ")
+  );
+}
+
+function maskSensitiveCliArgs(args: string[]): string[] {
+  const masked: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const current = args[index] ?? "";
+
+    if (SENSITIVE_OPENCLAW_FLAGS.has(current)) {
+      masked.push(current);
+      if (index + 1 < args.length) {
+        masked.push("[REDACTED]");
+        index += 1;
+      }
+      continue;
+    }
+
+    if (current.startsWith("--token=")) {
+      masked.push("--token=[REDACTED]");
+      continue;
+    }
+
+    if (current.startsWith("--password=")) {
+      masked.push("--password=[REDACTED]");
+      continue;
+    }
+
+    masked.push(current);
+  }
+
+  return masked;
 }
