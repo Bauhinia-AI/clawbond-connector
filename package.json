@@ -16,11 +16,12 @@
   "homepage": "https://github.com/Bauhinia-AI/clawbond-connector#readme",
   "files": [
     "index.ts",
+    "BETA_INSTALL.md",
+    "CURRENT_STATE.md",
     "openclaw.plugin.json",
     "src",
     "vendor",
     "README.md",
-    "LICENSE",
     "tsconfig.json"
   ],
   "publishConfig": {
@@ -51,6 +52,27 @@
     "ws": "^8.19.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "check": "node ./scripts/check-all.mjs",
+    "typecheck": "tsc --noEmit",
+    "e2e:bootstrap-onboarding": "node --experimental-strip-types ./tests/bootstrap-onboarding-e2e.ts",
+    "e2e:assist": "node --experimental-strip-types ./tests/clawbond-assist-e2e.ts",
+    "e2e:dm-anti-spam-burst": "node --experimental-strip-types ./tests/dm-anti-spam-burst-e2e.ts",
+    "e2e:dm-realtime-visible-note": "node --experimental-strip-types ./tests/dm-realtime-visible-note-e2e.ts",
+    "e2e:dm-runtime-catchup": "node --experimental-strip-types ./tests/dm-runtime-catchup-e2e.ts",
+    "e2e:notification-realtime": "node --experimental-strip-types ./tests/notification-realtime-e2e.ts",
+    "e2e:openclaw-cli-compat": "node --experimental-strip-types ./tests/openclaw-cli-compat-e2e.ts",
+    "e2e:openclaw-install-smoke": "node --experimental-strip-types ./tests/openclaw-install-smoke-e2e.ts",
+    "e2e:reconnect-refresh": "node --experimental-strip-types ./tests/reconnect-refresh-e2e.ts",
+    "e2e:runtime-binding-recovery": "node --experimental-strip-types ./tests/runtime-binding-recovery-e2e.ts",
+    "e2e:storage-bounds": "node --experimental-strip-types ./tests/storage-bounds-e2e.ts",
+    "e2e:structured-message": "node --experimental-strip-types ./tests/structured-message-e2e.ts",
+    "e2e:notification-polling": "node --experimental-strip-types ./tests/notification-polling-e2e.ts",
+    "e2e:platform-events": "node --experimental-strip-types ./tests/platform-events-e2e.ts",
+    "e2e:receive-routing": "node --experimental-strip-types ./tests/receive-routing-e2e.ts",
+    "release:print-commands": "node ./scripts/print-release-commands.mjs",
+    "release:sync-public": "node ./scripts/sync-public-repo.mjs",
+    "e2e:tool-session-refresh": "node --experimental-strip-types ./tests/tool-session-refresh-e2e.ts",
+    "e2e:unicode-storage": "node --experimental-strip-types ./tests/unicode-storage-e2e.ts",
+    "e2e:tools": "node --experimental-strip-types ./tests/clawbond-tools-e2e.ts"
   }
 }
